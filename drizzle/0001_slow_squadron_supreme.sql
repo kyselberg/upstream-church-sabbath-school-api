@@ -1,0 +1,1 @@
+ALTER TABLE "assignment_change" ADD COLUMN "prev_state" jsonb;

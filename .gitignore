@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+*.log
+
+# local tooling caches
+.claude/
+.agents/
+skills-lock.json
+coverage/
