@@ -47,6 +47,13 @@ export const auth = betterAuth({
   trustedOrigins: [process.env.WEB_ORIGIN, process.env.BETTER_AUTH_URL].filter(
     (v): v is string => Boolean(v),
   ),
+  advanced: {
+    defaultCookieAttributes: {
+      sameSite: 'none',
+      secure: true,
+      partitioned: true,
+    },
+  },
   databaseHooks: {
     user: {
       create: {
