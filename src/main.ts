@@ -13,6 +13,7 @@ import { toNodeHandler } from 'better-auth/node';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { auth } from './auth/auth';
+import { MetricsInterceptor } from './metrics.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
@@ -28,6 +29,7 @@ async function bootstrap() {
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalFilters(new AllExceptionsFilter());
+  app.useGlobalInterceptors(new MetricsInterceptor());
 
   const config = new DocumentBuilder()
     .setTitle('sabbath-api')

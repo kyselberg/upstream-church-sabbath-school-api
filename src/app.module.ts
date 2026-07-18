@@ -9,6 +9,8 @@ import { DbModule } from './db/db.module';
 import { HealthModule } from './health/health.module';
 import { InternalModule } from './internal/internal.module';
 import { MembersModule } from './members/members.module';
+import { MetricsController } from './metrics.controller';
+import { MetricsInterceptor } from './metrics.interceptor';
 import { QuartersModule } from './quarters/quarters.module';
 import { RbacModule } from './rbac/rbac.module';
 import { RolesModule } from './roles/roles.module';
@@ -33,5 +35,7 @@ import { SettingsModule } from './settings/settings.module';
     InternalModule,
     AnnounceModule,
   ],
+  controllers: [MetricsController],
+  providers: [MetricsInterceptor],
 })
 export class AppModule {}
