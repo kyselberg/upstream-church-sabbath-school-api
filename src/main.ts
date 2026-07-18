@@ -16,6 +16,7 @@ import { auth } from './auth/auth';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+  app.enableCors({ origin: process.env.WEB_ORIGIN, credentials: true });
 
   const expressApp = app.getHttpAdapter().getInstance();
   const authHandler = toNodeHandler(auth);
@@ -25,7 +26,6 @@ async function bootstrap() {
   app.use(json());
   app.use(urlencoded({ extended: true }));
 
-  app.enableCors({ origin: process.env.WEB_ORIGIN, credentials: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalFilters(new AllExceptionsFilter());
 
