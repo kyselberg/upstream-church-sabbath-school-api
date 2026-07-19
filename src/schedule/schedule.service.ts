@@ -17,6 +17,7 @@ import {
   inArray,
   isNull,
   lte,
+  ne,
   sql,
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -75,7 +76,11 @@ export class ScheduleService {
 
   async who(date: string) {
     const rows = await this.db
-      .select({ className: klass.name, presenter: member.fullName })
+      .select({
+        className: klass.name,
+        presenter: member.fullName,
+        status: assignment.status,
+      })
       .from(klass)
       .leftJoin(
         assignment,
@@ -88,12 +93,16 @@ export class ScheduleService {
     return rows.map((r) => ({
       className: r.className,
       presenter: r.presenter ?? null,
+      status: r.status ?? null,
     }));
   }
 
   listUpcoming(memberId?: string, limit = 10) {
     const today = new Date().toISOString().slice(0, 10);
-    const conditions = [gte(assignment.date, today)];
+    const conditions = [
+      gte(assignment.date, today),
+      ne(assignment.status, 'cancelled'),
+    ];
     if (memberId) conditions.push(eq(assignment.memberId, memberId));
 
     return this.db
@@ -345,6 +354,32 @@ export class ScheduleService {
     }
   }
 
+  private async assertNotDoubleBooked(
+    tx: Tx,
+    memberId: string,
+    date: string,
+    exceptAssignmentId: string,
+  ) {
+    const [clash] = await tx
+      .select({ id: assignment.id })
+      .from(assignment)
+      .where(
+        and(
+          eq(assignment.memberId, memberId),
+          eq(assignment.date, date),
+          ne(assignment.status, 'cancelled'),
+          ne(assignment.id, exceptAssignmentId),
+        ),
+      )
+      .limit(1);
+    if (clash) {
+      throw new UnprocessableEntityException({
+        code: 'double_booked',
+        message: 'Цей вчитель уже веде інший клас у цю дату.',
+      });
+    }
+  }
+
   private assertOwnership(
     a: { memberId: string | null; originalMemberId: string | null },
     ctx: MutationCtx,
@@ -394,6 +429,7 @@ export class ScheduleService {
       const a = await this.loadAssignmentForUpdate(tx, assignmentId);
       this.assertOwnership(a, ctx);
       await this.assertActiveInPool(tx, toMemberId, a.classId, !ctx.canAssignAny);
+      await this.assertNotDoubleBooked(tx, toMemberId, a.date, assignmentId);
 
       const fromMemberId = a.memberId;
       const prevState = this.snapshotOf(a);
@@ -434,6 +470,7 @@ export class ScheduleService {
       const a = await this.loadAssignmentForUpdate(t, assignmentId);
       this.assertOwnership(a, ctx);
       await this.assertActiveInPool(t, substituteMemberId, a.classId, !ctx.canAssignAny);
+      await this.assertNotDoubleBooked(t, substituteMemberId, a.date, assignmentId);
 
       const fromMemberId = a.memberId;
       const prevState = this.snapshotOf(a);
@@ -475,6 +512,7 @@ export class ScheduleService {
         });
       }
       await this.assertActiveInPool(tx, ctx.actorMemberId!, a.classId);
+      await this.assertNotDoubleBooked(tx, ctx.actorMemberId!, a.date, assignmentId);
 
       const prevState = this.snapshotOf(a);
       await tx
@@ -541,7 +579,17 @@ export class ScheduleService {
             message: 'Not your assignment',
           });
         }
+
+        if (bRow.memberId)
+          await this.assertActiveInPool(tx, bRow.memberId, aRow.classId, true);
+        if (aRow.memberId)
+          await this.assertActiveInPool(tx, aRow.memberId, bRow.classId, true);
       }
+
+      if (bRow.memberId)
+        await this.assertNotDoubleBooked(tx, bRow.memberId, aRow.date, bRow.id);
+      if (aRow.memberId)
+        await this.assertNotDoubleBooked(tx, aRow.memberId, bRow.date, aRow.id);
 
       const swapGroupId = randomUUID();
       const now = new Date();
@@ -703,10 +751,20 @@ export class ScheduleService {
     return this.db.transaction(async (tx) => {
       const swapGroupId = randomUUID();
       const now = new Date();
+      const seenMemberDate = new Set<string>();
 
       for (const item of sorted) {
         const a = await this.loadAssignmentForUpdate(tx, item.assignmentId);
+        const memberDateKey = `${item.memberId}|${a.date}`;
+        if (seenMemberDate.has(memberDateKey)) {
+          throw new UnprocessableEntityException({
+            code: 'double_booked',
+            message: 'Цей вчитель уже веде інший клас у цю дату.',
+          });
+        }
+        seenMemberDate.add(memberDateKey);
         await this.assertActiveInPool(tx, item.memberId, a.classId, !ctx.canAssignAny);
+        await this.assertNotDoubleBooked(tx, item.memberId, a.date, item.assignmentId);
 
         const prevState = this.snapshotOf(a);
         await tx
@@ -815,6 +873,12 @@ export class ScheduleService {
 
       const targetIds = changes.map((c) => c.id);
       const assignmentIds = [...new Set(changes.map((c) => c.assignmentId))];
+
+      await tx
+        .select({ id: assignment.id })
+        .from(assignment)
+        .where(inArray(assignment.id, assignmentIds))
+        .for('update');
 
       const activeRowsForAssignments = await tx
         .select()

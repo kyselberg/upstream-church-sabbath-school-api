@@ -100,6 +100,7 @@ export class InternalController {
       date: r.date,
       className: r.className,
       presenter: r.memberName,
+      status: r.status,
     }));
   }
 

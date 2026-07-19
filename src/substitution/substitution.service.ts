@@ -24,6 +24,12 @@ export function isResponder(
   return respondingMemberId === req.toMemberId;
 }
 
+export function isCandidateInPool(
+  poolRow: { memberId: string } | undefined,
+): boolean {
+  return poolRow !== undefined;
+}
+
 export function formatGroupText(
   candidateName: string,
   requesterName: string,
@@ -31,6 +37,27 @@ export function formatGroupText(
   date: string,
 ): string {
   return `🔄 Заміна: ${candidateName} замінює ${requesterName} — ${className}, ${date}`;
+}
+
+export async function membersBusyOnDate(
+  db: Pick<Db, 'selectDistinct'>,
+  date: string,
+  memberIds: string[],
+): Promise<Set<string>> {
+  if (memberIds.length === 0) return new Set();
+  const rows = await db
+    .selectDistinct({ memberId: assignment.memberId })
+    .from(assignment)
+    .where(
+      and(
+        eq(assignment.date, date),
+        inArray(assignment.memberId, memberIds),
+        ne(assignment.status, 'cancelled'),
+      ),
+    );
+  return new Set(
+    rows.map((r) => r.memberId).filter((id): id is string => id !== null),
+  );
 }
 
 @Injectable()
@@ -48,6 +75,10 @@ export class SubstitutionService {
       .limit(1);
     if (!a) return { error: 'assignment_not_found' as const };
     if (!isOwner(a, actorMemberId)) return { error: 'not_owner' as const };
+    if (a.status === 'cancelled') return { error: 'lesson_cancelled' as const };
+
+    const today = new Date().toISOString().slice(0, 10);
+    if (a.date < today) return { error: 'past_lesson' as const };
 
     const pool = await this.db
       .select({
@@ -67,7 +98,14 @@ export class SubstitutionService {
       );
     if (pool.length === 0) return { candidates: [] };
 
-    const today = new Date().toISOString().slice(0, 10);
+    const busy = await membersBusyOnDate(
+      this.db,
+      a.date,
+      pool.map((p) => p.memberId),
+    );
+    const free = pool.filter((p) => !busy.has(p.memberId));
+    if (free.length === 0) return { candidates: [] };
+
     const upcoming = await this.db
       .select({ memberId: assignment.memberId, status: assignment.status })
       .from(assignment)
@@ -75,7 +113,7 @@ export class SubstitutionService {
         and(
           inArray(
             assignment.memberId,
-            pool.map((p) => p.memberId),
+            free.map((p) => p.memberId),
           ),
           gte(assignment.date, today),
         ),
@@ -87,7 +125,7 @@ export class SubstitutionService {
       loadByMember.set(u.memberId, (loadByMember.get(u.memberId) ?? 0) + 1);
     }
 
-    const candidates = [...pool].sort((x, y) => {
+    const candidates = [...free].sort((x, y) => {
       const lx = loadByMember.get(x.memberId) ?? 0;
       const ly = loadByMember.get(y.memberId) ?? 0;
       return lx !== ly ? lx - ly : x.fullName.localeCompare(y.fullName);
@@ -108,6 +146,12 @@ export class SubstitutionService {
       .limit(1);
     if (!a) return { error: 'assignment_not_found' as const };
     if (!isOwner(a, fromMemberId)) return { error: 'not_owner' as const };
+    if (a.status === 'cancelled') return { error: 'lesson_cancelled' as const };
+
+    const today = new Date().toISOString().slice(0, 10);
+    if (a.date < today) return { error: 'past_lesson' as const };
+    if (toMemberId === fromMemberId)
+      return { error: 'invalid_candidate' as const };
 
     const [candidate] = await this.db
       .select({ id: member.id })
@@ -124,7 +168,16 @@ export class SubstitutionService {
       .limit(1);
     if (!candidate) return { error: 'invalid_candidate' as const };
 
+    const busy = await membersBusyOnDate(this.db, a.date, [toMemberId]);
+    if (busy.has(toMemberId)) return { error: 'candidate_busy' as const };
+
     return this.db.transaction(async (tx) => {
+      await tx
+        .select({ id: assignment.id })
+        .from(assignment)
+        .where(eq(assignment.id, assignmentId))
+        .for('update');
+
       await tx
         .update(substitutionRequest)
         .set({ status: 'superseded' })
@@ -188,7 +241,7 @@ export class SubstitutionService {
         .select()
         .from(assignment)
         .where(eq(assignment.id, reqRow.assignmentId))
-        .limit(1);
+        .for('update');
       const [requester] = await tx
         .select({
           fullName: member.fullName,
@@ -218,7 +271,13 @@ export class SubstitutionService {
       }
 
       const supersede = async (
-        error: 'assignment_gone' | 'holder_changed' | 'candidate_unavailable',
+        error:
+          | 'assignment_gone'
+          | 'holder_changed'
+          | 'candidate_unavailable'
+          | 'lesson_cancelled'
+          | 'past_lesson'
+          | 'candidate_busy',
       ) => {
         await tx
           .update(substitutionRequest)
@@ -229,6 +288,28 @@ export class SubstitutionService {
       if (!a) return supersede('assignment_gone');
       if (!isOwner(a, reqRow.fromMemberId)) return supersede('holder_changed');
       if (!candidateM.isActive) return supersede('candidate_unavailable');
+
+      const [poolRow] = await tx
+        .select({ memberId: classTeacher.memberId })
+        .from(classTeacher)
+        .innerJoin(member, eq(member.id, classTeacher.memberId))
+        .where(
+          and(
+            eq(classTeacher.classId, a.classId),
+            eq(classTeacher.memberId, reqRow.toMemberId),
+            eq(member.isActive, true),
+          ),
+        )
+        .limit(1);
+      if (!isCandidateInPool(poolRow)) return supersede('candidate_unavailable');
+
+      if (a.status === 'cancelled') return supersede('lesson_cancelled');
+
+      const today = new Date().toISOString().slice(0, 10);
+      if (a.date < today) return supersede('past_lesson');
+
+      const busy = await membersBusyOnDate(tx, a.date, [reqRow.toMemberId]);
+      if (busy.has(reqRow.toMemberId)) return supersede('candidate_busy');
 
       const [cls] = await tx
         .select({ name: klass.name })

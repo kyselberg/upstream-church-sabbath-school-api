@@ -429,4 +429,62 @@ describe('ScheduleService (integration)', () => {
       .where(eq(assignment.id, assignmentA));
     expect(row.memberId).toBe(m4);
   });
+
+  it('rejects reassigning a member onto a second class on a date they already present', async () => {
+    const [aRow] = await db
+      .select()
+      .from(assignment)
+      .where(eq(assignment.id, assignmentA));
+    await db
+      .update(assignment)
+      .set({ memberId: m1, originalMemberId: null, status: 'planned' })
+      .where(eq(assignment.id, assignmentA));
+
+    const [extraClass] = await db
+      .insert(klass)
+      .values({ name: `__test_class2_${suffix}`, sortOrder: 998 })
+      .returning();
+    const [extra] = await db
+      .insert(assignment)
+      .values({ classId: extraClass.id, date: aRow.date, status: 'planned' })
+      .returning();
+
+    try {
+      await expectRejectionCode(
+        service.reassign(extra.id, m1, {
+          actorMemberId: null,
+          source: 'system',
+          canAssignAny: true,
+        }),
+        'double_booked',
+      );
+    } finally {
+      await db.delete(assignment).where(eq(assignment.id, extra.id));
+      await db.delete(klass).where(eq(klass.id, extraClass.id));
+    }
+  });
+
+  it('who() returns status for a needs_substitute slot', async () => {
+    const [aRow] = await db
+      .select()
+      .from(assignment)
+      .where(eq(assignment.id, assignmentA));
+    await db
+      .update(assignment)
+      .set({ memberId: m1, originalMemberId: null, status: 'planned' })
+      .where(eq(assignment.id, assignmentA));
+
+    await service.markUnavailable(assignmentA, {
+      actorMemberId: null,
+      source: 'system',
+      canAssignAny: true,
+    });
+
+    const rows = await service.who(aRow.date);
+    const testClassName = (
+      await db.select().from(klass).where(eq(klass.id, classId))
+    )[0].name;
+    const row = rows.find((r) => r.className === testClassName);
+    expect(row?.status).toBe('needs_substitute');
+  });
 });
