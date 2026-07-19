@@ -1,13 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, gte, inArray, isNotNull, ne } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../db/db.module';
-import {
-  assignment,
-  classTeacher,
-  klass,
-  member,
-  substitutionRequest,
-} from '../db/schema';
+import { assignment, klass, member, substitutionRequest } from '../db/schema';
 import { ScheduleService } from '../schedule/schedule.service';
 
 export function isOwner(
@@ -22,12 +16,6 @@ export function isResponder(
   respondingMemberId: string,
 ): boolean {
   return respondingMemberId === req.toMemberId;
-}
-
-export function isCandidateInPool(
-  poolRow: { memberId: string } | undefined,
-): boolean {
-  return poolRow !== undefined;
 }
 
 export function formatGroupText(
@@ -86,11 +74,9 @@ export class SubstitutionService {
         fullName: member.fullName,
         telegramUserId: member.telegramUserId,
       })
-      .from(classTeacher)
-      .innerJoin(member, eq(member.id, classTeacher.memberId))
+      .from(member)
       .where(
         and(
-          eq(classTeacher.classId, a.classId),
           eq(member.isActive, true),
           isNotNull(member.telegramUserId),
           ne(member.id, actorMemberId),
@@ -155,12 +141,10 @@ export class SubstitutionService {
 
     const [candidate] = await this.db
       .select({ id: member.id })
-      .from(classTeacher)
-      .innerJoin(member, eq(member.id, classTeacher.memberId))
+      .from(member)
       .where(
         and(
-          eq(classTeacher.classId, a.classId),
-          eq(classTeacher.memberId, toMemberId),
+          eq(member.id, toMemberId),
           eq(member.isActive, true),
           isNotNull(member.telegramUserId),
         ),
@@ -288,20 +272,6 @@ export class SubstitutionService {
       if (!a) return supersede('assignment_gone');
       if (!isOwner(a, reqRow.fromMemberId)) return supersede('holder_changed');
       if (!candidateM.isActive) return supersede('candidate_unavailable');
-
-      const [poolRow] = await tx
-        .select({ memberId: classTeacher.memberId })
-        .from(classTeacher)
-        .innerJoin(member, eq(member.id, classTeacher.memberId))
-        .where(
-          and(
-            eq(classTeacher.classId, a.classId),
-            eq(classTeacher.memberId, reqRow.toMemberId),
-            eq(member.isActive, true),
-          ),
-        )
-        .limit(1);
-      if (!isCandidateInPool(poolRow)) return supersede('candidate_unavailable');
 
       if (a.status === 'cancelled') return supersede('lesson_cancelled');
 

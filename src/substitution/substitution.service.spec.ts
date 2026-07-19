@@ -1,9 +1,13 @@
+import 'dotenv/config';
+import { eq } from 'drizzle-orm';
+import { db } from '../db/db.module';
+import { assignment, klass, member } from '../db/schema';
 import {
   formatGroupText,
-  isCandidateInPool,
   isOwner,
   isResponder,
   membersBusyOnDate,
+  SubstitutionService,
 } from './substitution.service';
 
 describe('isOwner', () => {
@@ -63,14 +67,57 @@ describe('membersBusyOnDate', () => {
   });
 });
 
-describe('isCandidateInPool', () => {
-  it('is true when the pool query found the candidate still active in the class', () => {
-    expect(isCandidateInPool({ memberId: 'm1' })).toBe(true);
-  });
+describe('candidates() against a live DB', () => {
+  it('returns an active telegram-linked member who is NOT in the class teacher pool', async () => {
+    const service = new SubstitutionService(db, {} as any);
+    const tag = Date.now();
+    const [cls] = await db
+      .insert(klass)
+      .values({ name: `spec-class-${tag}` })
+      .returning({ id: klass.id });
+    const [requester] = await db
+      .insert(member)
+      .values({
+        fullName: `spec-requester-${tag}`,
+        telegramUserId: tag,
+        isActive: true,
+      })
+      .returning({ id: member.id });
+    const [nonPoolCandidate] = await db
+      .insert(member)
+      .values({
+        fullName: `spec-nonpool-${tag}`,
+        telegramUserId: tag + 1,
+        isActive: true,
+      })
+      .returning({ id: member.id });
+    const [a] = await db
+      .insert(assignment)
+      .values({
+        classId: cls.id,
+        date: '2099-01-01',
+        memberId: requester.id,
+      })
+      .returning({ id: assignment.id });
 
-  it('is false when the candidate was removed from the class pool since request() (candidate_unavailable gate)', () => {
-    expect(isCandidateInPool(undefined)).toBe(false);
-  });
+    try {
+      const result = await service.candidates(a.id, requester.id);
+      expect(
+        (result as { candidates: { memberId: string }[] }).candidates.map(
+          (c) => c.memberId,
+        ),
+      ).toContain(nonPoolCandidate.id);
+    } finally {
+      await db.delete(assignment).where(eq(assignment.id, a.id));
+      await db
+        .delete(member)
+        .where(eq(member.id, requester.id));
+      await db
+        .delete(member)
+        .where(eq(member.id, nonPoolCandidate.id));
+      await db.delete(klass).where(eq(klass.id, cls.id));
+    }
+  }, 20000);
 });
 
 describe('formatGroupText', () => {
