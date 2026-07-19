@@ -81,7 +81,7 @@ export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: 'pg', schema, transaction: true }),
   emailAndPassword: { enabled: true, disableSignUp: true },
   plugins: [
-    magicLink({ expiresIn: 300, disableSignUp: true, sendMagicLink }),
+    magicLink({ expiresIn: 900, disableSignUp: true, sendMagicLink }),
   ],
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL,

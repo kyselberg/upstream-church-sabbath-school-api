@@ -101,4 +101,18 @@ export class MembersService {
       expiresAt,
     };
   }
+
+  async unlinkTelegram(id: string) {
+    const [row] = await this.db
+      .update(member)
+      .set({
+        telegramUserId: null,
+        telegramUsername: null,
+        telegramLinkedAt: null,
+      })
+      .where(eq(member.id, id))
+      .returning();
+    if (!row) throw new NotFoundException('Member not found');
+    return row;
+  }
 }

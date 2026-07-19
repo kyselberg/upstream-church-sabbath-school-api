@@ -52,4 +52,10 @@ export class MembersController {
   createTelegramToken(@Param('id') id: string, @Req() req: AuthedRequest) {
     return this.members.createTelegramToken(id, req.member?.id);
   }
+
+  @Post(':id/telegram-unlink')
+  @RequirePermissions('telegram.link')
+  unlinkTelegram(@Param('id') id: string) {
+    return this.members.unlinkTelegram(id);
+  }
 }

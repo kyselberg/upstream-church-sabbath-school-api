@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/db.module';
 import { member, memberRole, role, user } from '../db/schema';
+import { isAlreadyLinked } from '../internal/internal.service';
 import { RbacService } from '../rbac/rbac.service';
 import { MembersService } from './members.service';
 
@@ -69,5 +70,33 @@ describe('MembersService.remove (integration)', () => {
       await db.delete(memberRole).where(eq(memberRole.memberId, m.id));
       await db.delete(member).where(eq(member.id, m.id));
     }
+  });
+
+  it('unlinkTelegram clears the telegram binding so the member can be re-linked', async () => {
+    const [m] = await db
+      .insert(member)
+      .values({
+        fullName: `__test_linked_${suffix}`,
+        telegramUserId: Number(`9${suffix.replace(/\D/g, '') || '1'}`),
+        telegramUsername: 'someone',
+        telegramLinkedAt: new Date(),
+      })
+      .returning();
+
+    try {
+      const updated = await service.unlinkTelegram(m.id);
+      expect(updated.telegramUserId).toBeNull();
+      expect(updated.telegramUsername).toBeNull();
+      expect(updated.telegramLinkedAt).toBeNull();
+      expect(isAlreadyLinked(updated.telegramUserId)).toBe(false);
+    } finally {
+      await db.delete(member).where(eq(member.id, m.id));
+    }
+  });
+
+  it('unlinkTelegram throws Member not found for an unknown id', async () => {
+    await expect(service.unlinkTelegram(randomUUID())).rejects.toThrow(
+      'Member not found',
+    );
   });
 });
