@@ -116,7 +116,10 @@ export class InternalService {
       });
 
     return {
+      llmProvider: row.llmProvider,
       llmModel: row.llmModel,
+      llmApiKey: row.llmApiKey,
+      llmBaseUrl: row.llmBaseUrl,
       botLocale: row.botLocale,
       undoWindowMinutes: row.undoWindowMinutes,
       timezone: row.timezone,

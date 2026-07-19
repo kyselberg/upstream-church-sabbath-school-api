@@ -12,8 +12,9 @@ export class SettingsController {
 
   @Get()
   @RequirePermissions('settings.manage')
-  get() {
-    return this.settings.get();
+  async get() {
+    const { llmApiKey, ...rest } = await this.settings.get();
+    return { ...rest, llmApiKeySet: !!llmApiKey };
   }
 
   @Patch()

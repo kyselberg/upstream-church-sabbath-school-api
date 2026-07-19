@@ -54,7 +54,22 @@ export class UpdateSettingsDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  llmProvider?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   llmModel?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  llmApiKey?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  llmBaseUrl?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

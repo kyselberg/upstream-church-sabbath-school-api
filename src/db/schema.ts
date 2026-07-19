@@ -328,7 +328,10 @@ export const appSettings = pgTable('app_settings', {
   reminderMinute: integer('reminder_minute').default(0).notNull(),
   pinWeekly: boolean('pin_weekly').default(true).notNull(),
   undoWindowMinutes: integer('undo_window_minutes').default(30).notNull(),
-  llmModel: text('llm_model').default('anthropic:claude-sonnet-4-6').notNull(),
+  llmProvider: text('llm_provider').default('anthropic').notNull(),
+  llmModel: text('llm_model').default('claude-sonnet-4-6').notNull(),
+  llmApiKey: text('llm_api_key'),
+  llmBaseUrl: text('llm_base_url'),
   botLocale: text('bot_locale').default('uk').notNull(),
   updatedAt: tstz('updated_at').defaultNow().notNull(),
 });
