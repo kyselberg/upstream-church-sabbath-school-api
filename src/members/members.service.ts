@@ -1,8 +1,14 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { eq } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../db/db.module';
-import { member, telegramLinkToken } from '../db/schema';
+import { member, telegramLinkToken, user } from '../db/schema';
+import { RbacService } from '../rbac/rbac.service';
 import type { CreateMemberDto } from './dto/create-member.dto';
 import type { UpdateMemberDto } from './dto/update-member.dto';
 
@@ -10,7 +16,10 @@ export const TOKEN_TTL_MS = 60 * 60 * 1000;
 
 @Injectable()
 export class MembersService {
-  constructor(@Inject(DRIZZLE) private readonly db: Db) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Db,
+    private readonly rbacService: RbacService,
+  ) {}
 
   findAll(activeOnly?: boolean) {
     return activeOnly
@@ -37,12 +46,31 @@ export class MembersService {
   }
 
   async remove(id: string) {
-    const [row] = await this.db
-      .delete(member)
-      .where(eq(member.id, id))
-      .returning();
-    if (!row) throw new NotFoundException('Member not found');
-    return row;
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(member)
+        .where(eq(member.id, id))
+        .limit(1);
+      if (!row) throw new NotFoundException('Member not found');
+
+      if (await this.rbacService.hasRole(id, 'superadmin')) {
+        throw new UnprocessableEntityException({
+          code: 'cannot_delete_superadmin',
+          message:
+            'Не можна видалити суперадміна — спершу зніми роль або заархівуй.',
+        });
+      }
+
+      const [deleted] = await tx
+        .delete(member)
+        .where(eq(member.id, id))
+        .returning();
+      if (row.userId) {
+        await tx.delete(user).where(eq(user.id, row.userId));
+      }
+      return deleted;
+    });
   }
 
   async createTelegramToken(
