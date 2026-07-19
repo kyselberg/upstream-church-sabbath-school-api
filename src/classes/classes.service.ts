@@ -1,5 +1,10 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, eq, gte, ne } from 'drizzle-orm';
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
+import { and, asc, eq, gte, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../db/db.module';
 import { assignment, classTeacher, klass, member } from '../db/schema';
 import type { AddTeacherDto } from './dto/add-teacher.dto';
@@ -33,6 +38,17 @@ export class ClassesService {
   }
 
   async remove(id: string) {
+    const [hasAssignment] = await this.db
+      .select({ id: assignment.id })
+      .from(assignment)
+      .where(eq(assignment.classId, id))
+      .limit(1);
+    if (hasAssignment)
+      throw new UnprocessableEntityException({
+        code: 'class_has_assignments',
+        message: 'Клас має призначення — спершу видали або перенеси їх.',
+      });
+
     const [row] = await this.db
       .delete(klass)
       .where(eq(klass.id, id))
@@ -43,6 +59,8 @@ export class ClassesService {
 
   async addTeacher(classId: string, dto: AddTeacherDto) {
     return this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${classId}))`);
+
       const [classRow] = await tx
         .select()
         .from(klass)
@@ -90,6 +108,8 @@ export class ClassesService {
 
   async setPrimary(classId: string, memberId: string, isPrimary: boolean) {
     return this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${classId}))`);
+
       const [pool] = await tx
         .select()
         .from(classTeacher)
@@ -149,6 +169,17 @@ export class ClassesService {
               eq(assignment.classId, classId),
               eq(assignment.memberId, memberId),
               ne(assignment.status, 'cancelled'),
+              gte(assignment.date, today),
+            ),
+          );
+
+        await tx
+          .update(assignment)
+          .set({ originalMemberId: null, updatedAt: new Date() })
+          .where(
+            and(
+              eq(assignment.classId, classId),
+              eq(assignment.originalMemberId, memberId),
               gte(assignment.date, today),
             ),
           );

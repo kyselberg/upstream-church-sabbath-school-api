@@ -35,6 +35,9 @@ export class AnnounceService {
         code: 'not_found',
         message: 'Change not found',
       });
+    if (change.announced) {
+      return { ok: true, messageId: null };
+    }
 
     const [a] = await this.db
       .select({ date: assignment.date, className: klass.name })
@@ -85,10 +88,12 @@ export class AnnounceService {
       sentAt: result.ok ? new Date() : null,
     });
 
-    await this.db
-      .update(assignmentChange)
-      .set({ announced: true })
-      .where(eq(assignmentChange.id, change.id));
+    if (result.ok) {
+      await this.db
+        .update(assignmentChange)
+        .set({ announced: true })
+        .where(eq(assignmentChange.id, change.id));
+    }
 
     return {
       ok: result.ok,
@@ -140,52 +145,58 @@ export class AnnounceService {
   }
 
   async retry(announcementId: string) {
-    const [row] = await this.db
-      .select()
-      .from(announcement)
-      .where(eq(announcement.id, announcementId))
-      .limit(1);
-    if (!row) {
-      throw new NotFoundException({
-        code: 'not_found',
-        message: 'Announcement not found',
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(announcement)
+        .where(eq(announcement.id, announcementId))
+        .for('update')
+        .limit(1);
+      if (!row) {
+        throw new NotFoundException({
+          code: 'not_found',
+          message: 'Announcement not found',
+        });
+      }
+      if (row.status === 'sent') {
+        return { ok: true };
+      }
+
+      const text = (row.payload as any)?.text as string | undefined;
+      if (!text) {
+        // ponytail: only announcements created after the payload change are
+        // retryable; a fresh app has ~none legacy without stored text.
+        throw new UnprocessableEntityException({
+          code: 'cannot_retry',
+          message: 'No stored text to resend',
+        });
+      }
+      const undoRef = (row.payload as any)?.undoRef ?? null;
+
+      const [settings] = await tx
+        .select()
+        .from(appSettings)
+        .where(eq(appSettings.id, 1))
+        .limit(1);
+
+      const result = await this.bot.announce({
+        chatId: row.chatId,
+        text,
+        undoRef,
+        undoWindowMinutes: settings?.undoWindowMinutes ?? 30,
       });
-    }
 
-    const text = (row.payload as any)?.text as string | undefined;
-    if (!text) {
-      // ponytail: only announcements created after the payload change are
-      // retryable; a fresh app has ~none legacy without stored text.
-      throw new UnprocessableEntityException({
-        code: 'cannot_retry',
-        message: 'No stored text to resend',
-      });
-    }
-    const undoRef = (row.payload as any)?.undoRef ?? null;
+      await tx
+        .update(announcement)
+        .set({
+          status: result.ok ? 'sent' : 'failed',
+          messageId: result.ok ? (result.messageId ?? null) : row.messageId,
+          sentAt: result.ok ? new Date() : row.sentAt,
+        })
+        .where(eq(announcement.id, announcementId));
 
-    const [settings] = await this.db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.id, 1))
-      .limit(1);
-
-    const result = await this.bot.announce({
-      chatId: row.chatId,
-      text,
-      undoRef,
-      undoWindowMinutes: settings?.undoWindowMinutes ?? 30,
+      return { ok: result.ok };
     });
-
-    await this.db
-      .update(announcement)
-      .set({
-        status: result.ok ? 'sent' : 'failed',
-        messageId: result.ok ? (result.messageId ?? null) : row.messageId,
-        sentAt: result.ok ? new Date() : row.sentAt,
-      })
-      .where(eq(announcement.id, announcementId));
-
-    return { ok: result.ok };
   }
 
   private async memberName(memberId: string | null) {

@@ -38,7 +38,7 @@ export class AnnouncementsService {
 
     const targetDate = params.targetDate ?? null;
     const [existing] = await this.db
-      .select({ id: announcement.id })
+      .select({ id: announcement.id, status: announcement.status })
       .from(announcement)
       .where(
         and(
@@ -50,7 +50,28 @@ export class AnnouncementsService {
       )
       .limit(1);
 
-    return { claimed: false, announcementId: existing?.id ?? null };
+    if (!existing) return { claimed: false, announcementId: null };
+    if (existing.status === 'sent') {
+      return { claimed: false, announcementId: existing.id };
+    }
+
+    // ponytail: flip the status so the compare-and-set below only lets one
+    // concurrent re-claim win the row (a same-value "touch" wouldn't gate).
+    const nextStatus = existing.status === 'pending' ? 'failed' : 'pending';
+    const [reclaimed] = await this.db
+      .update(announcement)
+      .set({ status: nextStatus })
+      .where(
+        and(
+          eq(announcement.id, existing.id),
+          eq(announcement.status, existing.status),
+        ),
+      )
+      .returning({ id: announcement.id });
+
+    return reclaimed
+      ? { claimed: true, announcementId: reclaimed.id }
+      : { claimed: false, announcementId: existing.id };
   }
 
   async markSent(id: string, messageId: number) {

@@ -3,8 +3,9 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../db/db.module';
 import { RbacService } from '../rbac/rbac.service';
 import {
@@ -136,16 +137,42 @@ export class RolesService {
 
     await this.assertActorCanManageRole(roleRow.id, actorMemberId);
 
-    await this.db
-      .insert(memberRole)
-      .values({ memberId, roleId: roleRow.id })
-      .onConflictDoNothing();
+    const [existing] = await this.db
+      .select({ id: memberRole.id })
+      .from(memberRole)
+      .where(
+        and(
+          eq(memberRole.memberId, memberId),
+          eq(memberRole.roleId, roleRow.id),
+          isNull(memberRole.scopeClassId),
+        ),
+      )
+      .limit(1);
+    if (!existing)
+      await this.db.insert(memberRole).values({ memberId, roleId: roleRow.id });
 
     return this.memberRoles(memberId);
   }
 
   async revoke(memberId: string, roleId: string, actorMemberId: string) {
     await this.assertActorCanManageRole(roleId, actorMemberId);
+
+    const [roleRow] = await this.db
+      .select({ key: role.key })
+      .from(role)
+      .where(eq(role.id, roleId))
+      .limit(1);
+    if (roleRow?.key === 'superadmin') {
+      const holders = await this.db
+        .select({ memberId: memberRole.memberId })
+        .from(memberRole)
+        .where(eq(memberRole.roleId, roleId));
+      if (holders.length <= 1)
+        throw new UnprocessableEntityException({
+          code: 'last_superadmin',
+          message: 'Не можна зняти роль в останнього суперадміна.',
+        });
+    }
 
     const [row] = await this.db
       .delete(memberRole)

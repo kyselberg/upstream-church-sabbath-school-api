@@ -97,6 +97,7 @@ export class InternalController {
   async upcoming(@Query('memberId') memberId?: string) {
     const rows = await this.schedule.listUpcoming(memberId);
     return rows.map((r) => ({
+      id: r.id,
       date: r.date,
       className: r.className,
       presenter: r.memberName,

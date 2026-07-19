@@ -1,4 +1,9 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { asc, desc, eq } from 'drizzle-orm';
 import { saturdaysBetween } from '../common/dates';
 import { DRIZZLE, type Db } from '../db/db.module';
@@ -14,7 +19,16 @@ export class QuartersService {
     return this.db.select().from(quarter);
   }
 
-  create(dto: CreateQuarterDto) {
+  async create(dto: CreateQuarterDto) {
+    const days =
+      (new Date(dto.endDate).getTime() - new Date(dto.startDate).getTime()) /
+      86_400_000;
+    if (days <= 0 || days > 400) {
+      throw new BadRequestException({
+        code: 'invalid_quarter_range',
+        message: 'Некоректний або надто великий діапазон кварталу.',
+      });
+    }
     return this.db
       .insert(quarter)
       .values(dto)
@@ -33,12 +47,15 @@ export class QuartersService {
   }
 
   async remove(id: string) {
-    const [row] = await this.db
-      .delete(quarter)
-      .where(eq(quarter.id, id))
-      .returning();
-    if (!row) throw new NotFoundException('Quarter not found');
-    return row;
+    return this.db.transaction(async (tx) => {
+      await tx.delete(assignment).where(eq(assignment.quarterId, id));
+      const [row] = await tx
+        .delete(quarter)
+        .where(eq(quarter.id, id))
+        .returning();
+      if (!row) throw new NotFoundException('Quarter not found');
+      return row;
+    });
   }
 
   async generateSaturdays(id: string, autoFill = false) {
