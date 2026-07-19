@@ -146,3 +146,9 @@ export class RemindersSentDto {
   @IsInt()
   messageId!: number;
 }
+
+export class LoginLinkInternalDto {
+  @ApiProperty()
+  @IsInt()
+  telegramUserId!: number;
+}
