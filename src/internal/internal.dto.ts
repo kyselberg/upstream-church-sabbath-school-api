@@ -1,14 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
   IsUUID,
   Matches,
-  ValidateNested,
 } from 'class-validator';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -36,45 +35,6 @@ export class ClassDateDto {
   @ApiProperty()
   @Matches(DATE_RE)
   date!: string;
-}
-
-export class ReassignInternalDto extends ClassDateDto {
-  @ApiProperty()
-  @IsUUID()
-  toMemberId!: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsUUID()
-  actorMemberId?: string | null;
-}
-
-export class SubstituteInternalDto extends ClassDateDto {
-  @ApiProperty()
-  @IsUUID()
-  substituteMemberId!: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsUUID()
-  actorMemberId?: string | null;
-}
-
-export class SwapInternalDto {
-  @ApiProperty({ type: ClassDateDto })
-  @ValidateNested()
-  @Type(() => ClassDateDto)
-  a!: ClassDateDto;
-
-  @ApiProperty({ type: ClassDateDto })
-  @ValidateNested()
-  @Type(() => ClassDateDto)
-  b!: ClassDateDto;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsUUID()
-  actorMemberId?: string | null;
 }
 
 export class MarkUnavailableInternalDto extends ClassDateDto {
@@ -151,4 +111,38 @@ export class LoginLinkInternalDto {
   @ApiProperty()
   @IsInt()
   telegramUserId!: number;
+}
+
+export class SubstitutionCandidatesDto {
+  @ApiProperty()
+  @IsUUID()
+  assignmentId!: string;
+
+  @ApiProperty()
+  @IsUUID()
+  actorMemberId!: string;
+}
+
+export class SubstitutionRequestDto {
+  @ApiProperty()
+  @IsUUID()
+  assignmentId!: string;
+
+  @ApiProperty()
+  @IsUUID()
+  fromMemberId!: string;
+
+  @ApiProperty()
+  @IsUUID()
+  toMemberId!: string;
+}
+
+export class SubstitutionRespondDto {
+  @ApiProperty()
+  @IsBoolean()
+  accept!: boolean;
+
+  @ApiProperty()
+  @IsInt()
+  byTelegramUserId!: number;
 }

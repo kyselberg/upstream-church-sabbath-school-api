@@ -13,6 +13,10 @@ import {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export function isAlreadyLinked(telegramUserId: number | null): boolean {
+  return telegramUserId != null;
+}
+
 @Injectable()
 export class InternalService {
   constructor(@Inject(DRIZZLE) private readonly db: Db) {}
@@ -146,6 +150,16 @@ export class InternalService {
         tokenRow.expiresAt.getTime() < Date.now()
       ) {
         return { error: 'invalid_token' };
+      }
+
+      const [target] = await tx
+        .select({ telegramUserId: member.telegramUserId })
+        .from(member)
+        .where(eq(member.id, tokenRow.memberId))
+        .limit(1)
+        .for('update');
+      if (isAlreadyLinked(target?.telegramUserId ?? null)) {
+        return { error: 'member_already_linked' };
       }
 
       const [conflict] = await tx

@@ -33,6 +33,7 @@ describe('ScheduleService (integration)', () => {
   let m1: string;
   let m2: string;
   let m3: string;
+  let m4: string;
   let assignmentA: string;
   let assignmentB: string;
 
@@ -49,9 +50,10 @@ describe('ScheduleService (integration)', () => {
         { fullName: `__test_m1_${suffix}` },
         { fullName: `__test_m2_${suffix}` },
         { fullName: `__test_m3_${suffix}` },
+        { fullName: `__test_m4_${suffix}` },
       ])
       .returning();
-    [m1, m2, m3] = members.map((m) => m.id);
+    [m1, m2, m3, m4] = members.map((m) => m.id);
 
     await db.insert(classTeacher).values([
       { classId, memberId: m1 },
@@ -81,6 +83,7 @@ describe('ScheduleService (integration)', () => {
     await db.delete(member).where(eq(member.id, m1));
     await db.delete(member).where(eq(member.id, m2));
     await db.delete(member).where(eq(member.id, m3));
+    await db.delete(member).where(eq(member.id, m4));
   });
 
   it('swap happy path exchanges memberIds and writes 2 linked change rows', async () => {
@@ -206,6 +209,39 @@ describe('ScheduleService (integration)', () => {
 
     await service.undo(`change:${changeId}`, m2);
     await expect(service.undo(`change:${changeId}`, m2)).rejects.toThrow();
+  });
+
+  it('actorScoped undo refuses when the change actor differs from byMemberId', async () => {
+    await db
+      .update(assignment)
+      .set({ memberId: m1, originalMemberId: null, status: 'planned' })
+      .where(eq(assignment.id, assignmentA));
+
+    const { changeId } = await service.reassign(assignmentA, m2, {
+      actorMemberId: m1,
+      source: 'telegram',
+      canAssignAny: true,
+    });
+
+    const result = await service.undo(`change:${changeId}`, m3, {
+      actorScoped: true,
+    });
+    expect(result).toEqual({
+      ok: false,
+      message: 'Скасувати цю дію може лише той, хто її зробив.',
+    });
+
+    const [row] = await db
+      .select()
+      .from(assignment)
+      .where(eq(assignment.id, assignmentA));
+    expect(row.memberId).toBe(m2);
+
+    const [changeRow] = await db
+      .select()
+      .from(assignmentChange)
+      .where(eq(assignmentChange.id, changeId));
+    expect(changeRow.undoneAt).toBeNull();
   });
 
   it('chained substitute undo restores the original presenter and originalMemberId', async () => {
@@ -365,5 +401,32 @@ describe('ScheduleService (integration)', () => {
       }),
       'nothing_to_swap',
     );
+  });
+
+  it('reassign to a non-pool member is rejected without canAssignAny and allowed with it', async () => {
+    await db
+      .update(assignment)
+      .set({ memberId: m1, originalMemberId: null, status: 'planned' })
+      .where(eq(assignment.id, assignmentA));
+
+    await expectRejectionCode(
+      service.reassign(assignmentA, m4, {
+        actorMemberId: m1,
+        source: 'web',
+        canAssignAny: false,
+      }),
+      'not_in_pool',
+    );
+
+    await service.reassign(assignmentA, m4, {
+      actorMemberId: null,
+      source: 'system',
+      canAssignAny: true,
+    });
+    const [row] = await db
+      .select()
+      .from(assignment)
+      .where(eq(assignment.id, assignmentA));
+    expect(row.memberId).toBe(m4);
   });
 });

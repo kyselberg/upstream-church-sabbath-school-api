@@ -17,6 +17,7 @@ import { MetricsInterceptor } from './metrics.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+  if (!process.env.WEB_ORIGIN) throw new Error('WEB_ORIGIN is required');
   app.enableCors({ origin: process.env.WEB_ORIGIN, credentials: true });
 
   const expressApp = app.getHttpAdapter().getInstance();
@@ -27,7 +28,13 @@ async function bootstrap() {
   app.use(json());
   app.use(urlencoded({ extended: true }));
 
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+    }),
+  );
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new MetricsInterceptor());
 

@@ -1,12 +1,54 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../db/db.module';
-import { member, memberRole, permission, role } from '../db/schema';
+import { RbacService } from '../rbac/rbac.service';
+import {
+  member,
+  memberRole,
+  permission,
+  role,
+  rolePermission,
+} from '../db/schema';
 import type { GrantRoleDto } from './dto/grant-role.dto';
 
 @Injectable()
 export class RolesService {
-  constructor(@Inject(DRIZZLE) private readonly db: Db) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Db,
+    private readonly rbac: RbacService,
+  ) {}
+
+  private async roleGrantsRoleManage(roleId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ key: permission.key })
+      .from(rolePermission)
+      .innerJoin(permission, eq(permission.id, rolePermission.permissionId))
+      .where(
+        and(
+          eq(rolePermission.roleId, roleId),
+          eq(permission.key, 'role.manage'),
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
+  }
+
+  private async assertActorCanManageRole(
+    roleId: string,
+    actorMemberId: string,
+  ) {
+    if (!(await this.roleGrantsRoleManage(roleId))) return;
+    if (await this.rbac.hasRole(actorMemberId, 'superadmin')) return;
+    throw new ForbiddenException({
+      code: 'forbidden',
+      message: 'Only superadmin manages role-managing roles',
+    });
+  }
 
   listRoles() {
     return this.db
@@ -73,7 +115,7 @@ export class RolesService {
     return null;
   }
 
-  async grant(memberId: string, dto: GrantRoleDto) {
+  async grant(memberId: string, dto: GrantRoleDto, actorMemberId: string) {
     const [memberRow] = await this.db
       .select()
       .from(member)
@@ -92,6 +134,8 @@ export class RolesService {
         message: 'Role not found',
       });
 
+    await this.assertActorCanManageRole(roleRow.id, actorMemberId);
+
     await this.db
       .insert(memberRole)
       .values({ memberId, roleId: roleRow.id })
@@ -100,7 +144,9 @@ export class RolesService {
     return this.memberRoles(memberId);
   }
 
-  async revoke(memberId: string, roleId: string) {
+  async revoke(memberId: string, roleId: string, actorMemberId: string) {
+    await this.assertActorCanManageRole(roleId, actorMemberId);
+
     const [row] = await this.db
       .delete(memberRole)
       .where(

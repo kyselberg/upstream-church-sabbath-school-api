@@ -6,7 +6,7 @@ import { member, telegramLinkToken } from '../db/schema';
 import type { CreateMemberDto } from './dto/create-member.dto';
 import type { UpdateMemberDto } from './dto/update-member.dto';
 
-const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const TOKEN_TTL_MS = 60 * 60 * 1000;
 
 @Injectable()
 export class MembersService {

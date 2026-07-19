@@ -268,6 +268,31 @@ export const telegramLinkToken = pgTable(
   }),
 );
 
+export const substitutionRequest = pgTable(
+  'substitution_request',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    assignmentId: uuid('assignment_id')
+      .references(() => assignment.id, { onDelete: 'cascade' })
+      .notNull(),
+    fromMemberId: uuid('from_member_id')
+      .references(() => member.id, { onDelete: 'cascade' })
+      .notNull(),
+    toMemberId: uuid('to_member_id')
+      .references(() => member.id, { onDelete: 'cascade' })
+      .notNull(),
+    status: text('status').default('pending').notNull(),
+    createdAt: tstz('created_at').defaultNow().notNull(),
+    respondedAt: tstz('responded_at'),
+  },
+  (t) => ({
+    assignmentStatusIdx: index('substitution_request_assignment_status_idx').on(
+      t.assignmentId,
+      t.status,
+    ),
+  }),
+);
+
 export const announcement = pgTable(
   'announcement',
   {

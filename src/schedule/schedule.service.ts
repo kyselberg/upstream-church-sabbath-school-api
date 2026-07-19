@@ -308,7 +308,12 @@ export class ScheduleService {
     return { holes: result };
   }
 
-  private async assertActiveInPool(tx: Tx, memberId: string, classId: string) {
+  private async assertActiveInPool(
+    tx: Tx,
+    memberId: string,
+    classId: string,
+    requirePool = true,
+  ) {
     const [m] = await tx
       .select()
       .from(member)
@@ -320,6 +325,7 @@ export class ScheduleService {
         message: 'Member is not active',
       });
     }
+    if (!requirePool) return;
 
     const [pool] = await tx
       .select()
@@ -387,7 +393,7 @@ export class ScheduleService {
     return this.db.transaction(async (tx) => {
       const a = await this.loadAssignmentForUpdate(tx, assignmentId);
       this.assertOwnership(a, ctx);
-      await this.assertActiveInPool(tx, toMemberId, a.classId);
+      await this.assertActiveInPool(tx, toMemberId, a.classId, !ctx.canAssignAny);
 
       const fromMemberId = a.memberId;
       const prevState = this.snapshotOf(a);
@@ -422,15 +428,16 @@ export class ScheduleService {
     assignmentId: string,
     substituteMemberId: string,
     ctx: MutationCtx,
+    tx?: Tx,
   ) {
-    return this.db.transaction(async (tx) => {
-      const a = await this.loadAssignmentForUpdate(tx, assignmentId);
+    const run = async (t: Tx) => {
+      const a = await this.loadAssignmentForUpdate(t, assignmentId);
       this.assertOwnership(a, ctx);
-      await this.assertActiveInPool(tx, substituteMemberId, a.classId);
+      await this.assertActiveInPool(t, substituteMemberId, a.classId, !ctx.canAssignAny);
 
       const fromMemberId = a.memberId;
       const prevState = this.snapshotOf(a);
-      await tx
+      await t
         .update(assignment)
         .set({
           originalMemberId: a.originalMemberId ?? a.memberId,
@@ -440,7 +447,7 @@ export class ScheduleService {
         })
         .where(eq(assignment.id, assignmentId));
 
-      const [change] = await tx
+      const [change] = await t
         .insert(assignmentChange)
         .values({
           assignmentId,
@@ -454,7 +461,8 @@ export class ScheduleService {
         .returning({ id: assignmentChange.id });
 
       return { changeId: change.id };
-    });
+    };
+    return tx ? run(tx) : this.db.transaction(run);
   }
 
   async claim(assignmentId: string, ctx: MutationCtx) {
@@ -698,7 +706,7 @@ export class ScheduleService {
 
       for (const item of sorted) {
         const a = await this.loadAssignmentForUpdate(tx, item.assignmentId);
-        await this.assertActiveInPool(tx, item.memberId, a.classId);
+        await this.assertActiveInPool(tx, item.memberId, a.classId, !ctx.canAssignAny);
 
         const prevState = this.snapshotOf(a);
         await tx
@@ -727,7 +735,11 @@ export class ScheduleService {
     });
   }
 
-  async undo(ref: string, byMemberId: string | null) {
+  async undo(
+    ref: string,
+    byMemberId: string | null,
+    opts?: { actorScoped?: boolean },
+  ) {
     const [kind, refId] = ref.split(':');
     if (!refId || (kind !== 'change' && kind !== 'swap')) {
       throw new NotFoundException({
@@ -762,6 +774,16 @@ export class ScheduleService {
           .from(assignmentChange)
           .where(eq(assignmentChange.swapGroupId, changes[0].swapGroupId))
           .for('update');
+      }
+
+      if (
+        opts?.actorScoped &&
+        changes.some((c) => c.actorMemberId !== byMemberId)
+      ) {
+        return {
+          ok: false,
+          message: 'Скасувати цю дію може лише той, хто її зробив.',
+        };
       }
 
       if (changes.some((c) => c.undoneAt)) {

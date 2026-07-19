@@ -5,8 +5,10 @@ import {
   Get,
   Param,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { AuthedRequest } from '../auth/session.guard';
 import { SessionGuard } from '../auth/session.guard';
 import { PermissionGuard } from '../rbac/permission.guard';
 import { RequirePermissions } from '../rbac/permissions.decorator';
@@ -38,13 +40,21 @@ export class RolesController {
 
   @Post('members/:id/roles')
   @RequirePermissions('role.manage')
-  grant(@Param('id') id: string, @Body() dto: GrantRoleDto) {
-    return this.roles.grant(id, dto);
+  grant(
+    @Param('id') id: string,
+    @Body() dto: GrantRoleDto,
+    @Req() req: AuthedRequest,
+  ) {
+    return this.roles.grant(id, dto, req.member!.id);
   }
 
   @Delete('members/:id/roles/:roleId')
   @RequirePermissions('role.manage')
-  revoke(@Param('id') id: string, @Param('roleId') roleId: string) {
-    return this.roles.revoke(id, roleId);
+  revoke(
+    @Param('id') id: string,
+    @Param('roleId') roleId: string,
+    @Req() req: AuthedRequest,
+  ) {
+    return this.roles.revoke(id, roleId, req.member!.id);
   }
 }

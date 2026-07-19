@@ -12,16 +12,17 @@ import {
 import { AgentLogService } from '../agent-log/agent-log.service';
 import { AnnouncementsService } from '../announcements/announcements.service';
 import { ScheduleService } from '../schedule/schedule.service';
+import { SubstitutionService } from '../substitution/substitution.service';
 import {
   AgentLogClaimDto,
   AgentLogFinishDto,
   LinkTelegramDto,
   MarkUnavailableInternalDto,
-  ReassignInternalDto,
   RemindersClaimDto,
   RemindersSentDto,
-  SubstituteInternalDto,
-  SwapInternalDto,
+  SubstitutionCandidatesDto,
+  SubstitutionRequestDto,
+  SubstitutionRespondDto,
   UndoInternalDto,
 } from './internal.dto';
 import { InternalTokenGuard } from './internal-token.guard';
@@ -35,6 +36,7 @@ export class InternalController {
     private readonly schedule: ScheduleService,
     private readonly announcements: AnnouncementsService,
     private readonly agentLog: AgentLogService,
+    private readonly substitution: SubstitutionService,
   ) {}
 
   private async assignmentFor(classId: string, date: string) {
@@ -101,50 +103,47 @@ export class InternalController {
     }));
   }
 
-  @Post('schedule/reassign')
-  async reassign(@Body() dto: ReassignInternalDto) {
-    const a = await this.assignmentFor(dto.classId, dto.date);
-    return this.schedule.reassign(a.id, dto.toMemberId, {
-      actorMemberId: dto.actorMemberId ?? null,
-      source: 'telegram',
-      canAssignAny: true,
-    });
-  }
-
-  @Post('schedule/substitute')
-  async substitute(@Body() dto: SubstituteInternalDto) {
-    const a = await this.assignmentFor(dto.classId, dto.date);
-    return this.schedule.substitute(a.id, dto.substituteMemberId, {
-      actorMemberId: dto.actorMemberId ?? null,
-      source: 'telegram',
-      canAssignAny: true,
-    });
-  }
-
-  @Post('schedule/swap')
-  async swap(@Body() dto: SwapInternalDto) {
-    const a = await this.assignmentFor(dto.a.classId, dto.a.date);
-    const b = await this.assignmentFor(dto.b.classId, dto.b.date);
-    return this.schedule.swap(a.id, b.id, {
-      actorMemberId: dto.actorMemberId ?? null,
-      source: 'telegram',
-      canAssignAny: true,
-    });
-  }
-
   @Post('schedule/mark-unavailable')
   async markUnavailable(@Body() dto: MarkUnavailableInternalDto) {
     const a = await this.assignmentFor(dto.classId, dto.date);
     return this.schedule.markUnavailable(a.id, {
       actorMemberId: dto.actorMemberId ?? null,
       source: 'telegram',
-      canAssignAny: true,
+      canAssignAny: false,
     });
   }
 
   @Post('schedule/undo')
   undo(@Body() dto: UndoInternalDto) {
-    return this.schedule.undo(dto.ref, dto.byMemberId ?? null);
+    if (!dto.byMemberId)
+      return { ok: false, message: 'Спершу привʼяжи акаунт: /start' };
+    return this.schedule.undo(dto.ref, dto.byMemberId, { actorScoped: true });
+  }
+
+  @Post('substitution/candidates')
+  substitutionCandidates(@Body() dto: SubstitutionCandidatesDto) {
+    return this.substitution.candidates(dto.assignmentId, dto.actorMemberId);
+  }
+
+  @Post('substitution/request')
+  substitutionRequest(@Body() dto: SubstitutionRequestDto) {
+    return this.substitution.request(
+      dto.assignmentId,
+      dto.fromMemberId,
+      dto.toMemberId,
+    );
+  }
+
+  @Post('substitution/:requestId/respond')
+  substitutionRespond(
+    @Param('requestId') requestId: string,
+    @Body() dto: SubstitutionRespondDto,
+  ) {
+    return this.substitution.respond(
+      requestId,
+      dto.accept,
+      dto.byTelegramUserId,
+    );
   }
 
   @Get('settings')

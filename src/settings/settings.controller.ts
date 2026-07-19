@@ -19,7 +19,8 @@ export class SettingsController {
 
   @Patch()
   @RequirePermissions('settings.manage')
-  update(@Body() dto: UpdateSettingsDto) {
-    return this.settings.update(dto);
+  async update(@Body() dto: UpdateSettingsDto) {
+    const { llmApiKey, ...rest } = await this.settings.update(dto);
+    return { ...rest, llmApiKeySet: !!llmApiKey };
   }
 }
