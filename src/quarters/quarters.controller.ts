@@ -12,6 +12,7 @@ import { SessionGuard } from '../auth/session.guard';
 import { PermissionGuard } from '../rbac/permission.guard';
 import { RequirePermissions } from '../rbac/permissions.decorator';
 import { CreateQuarterDto } from './dto/create-quarter.dto';
+import { GenerateSaturdaysDto } from './dto/generate-saturdays.dto';
 import { UpdateQuarterDto } from './dto/update-quarter.dto';
 import { QuartersService } from './quarters.service';
 
@@ -46,7 +47,10 @@ export class QuartersController {
 
   @Post(':id/generate-saturdays')
   @RequirePermissions('schedule.assign')
-  generateSaturdays(@Param('id') id: string) {
-    return this.quarters.generateSaturdays(id);
+  generateSaturdays(
+    @Param('id') id: string,
+    @Body() dto: GenerateSaturdaysDto,
+  ) {
+    return this.quarters.generateSaturdays(id, dto?.autoFill ?? false);
   }
 }

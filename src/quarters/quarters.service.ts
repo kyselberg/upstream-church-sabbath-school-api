@@ -1,8 +1,8 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { asc, desc, eq } from 'drizzle-orm';
 import { saturdaysBetween } from '../common/dates';
 import { DRIZZLE, type Db } from '../db/db.module';
-import { assignment, klass, quarter } from '../db/schema';
+import { assignment, classTeacher, klass, member, quarter } from '../db/schema';
 import type { CreateQuarterDto } from './dto/create-quarter.dto';
 import type { UpdateQuarterDto } from './dto/update-quarter.dto';
 
@@ -41,7 +41,7 @@ export class QuartersService {
     return row;
   }
 
-  async generateSaturdays(id: string) {
+  async generateSaturdays(id: string, autoFill = false) {
     const [q] = await this.db
       .select()
       .from(quarter)
@@ -55,15 +55,35 @@ export class QuartersService {
       .from(klass)
       .where(eq(klass.isActive, true));
 
-    const rows = activeClasses.flatMap((c) =>
-      saturdays.map((date) => ({
+    const poolByClass = new Map<string, string[]>();
+    if (autoFill) {
+      const poolRows = await this.db
+        .select({
+          classId: classTeacher.classId,
+          memberId: classTeacher.memberId,
+        })
+        .from(classTeacher)
+        .innerJoin(member, eq(member.id, classTeacher.memberId))
+        .where(eq(member.isActive, true))
+        .orderBy(desc(classTeacher.isPrimary), asc(classTeacher.memberId));
+
+      for (const p of poolRows) {
+        const list = poolByClass.get(p.classId) ?? [];
+        list.push(p.memberId);
+        poolByClass.set(p.classId, list);
+      }
+    }
+
+    const rows = activeClasses.flatMap((c) => {
+      const pool = poolByClass.get(c.id) ?? [];
+      return saturdays.map((date, i) => ({
         classId: c.id,
         date,
         quarterId: id,
         status: 'planned' as const,
-        memberId: null,
-      })),
-    );
+        memberId: pool.length > 0 ? pool[i % pool.length] : null,
+      }));
+    });
 
     if (rows.length === 0) return { saturdays, created: 0 };
 

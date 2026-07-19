@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { SessionGuard } from '../auth/session.guard';
@@ -14,6 +15,7 @@ import { RequirePermissions } from '../rbac/permissions.decorator';
 import { ClassesService } from './classes.service';
 import { AddTeacherDto } from './dto/add-teacher.dto';
 import { CreateClassDto } from './dto/create-class.dto';
+import { SetPrimaryDto } from './dto/set-primary.dto';
 import { UpdateClassDto } from './dto/update-class.dto';
 
 @Controller('classes')
@@ -57,9 +59,27 @@ export class ClassesController {
     return this.classes.addTeacher(id, dto);
   }
 
+  @Patch(':id/teachers/:memberId')
+  @RequirePermissions('class.manage')
+  setPrimary(
+    @Param('id') id: string,
+    @Param('memberId') memberId: string,
+    @Body() dto: SetPrimaryDto,
+  ) {
+    return this.classes.setPrimary(id, memberId, dto.isPrimary);
+  }
+
   @Delete(':id/teachers/:memberId')
   @RequirePermissions('class.manage')
-  removeTeacher(@Param('id') id: string, @Param('memberId') memberId: string) {
-    return this.classes.removeTeacher(id, memberId);
+  removeTeacher(
+    @Param('id') id: string,
+    @Param('memberId') memberId: string,
+    @Query('releaseFutureSlots') releaseFutureSlots?: string,
+  ) {
+    return this.classes.removeTeacher(
+      id,
+      memberId,
+      releaseFutureSlots === 'true',
+    );
   }
 }

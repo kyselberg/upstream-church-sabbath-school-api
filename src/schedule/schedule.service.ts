@@ -30,6 +30,7 @@ import {
   classTeacher,
   klass,
   member,
+  quarter,
 } from '../db/schema';
 
 export type ChangeSource = 'web' | 'telegram' | 'system';
@@ -171,6 +172,7 @@ export class ScheduleService {
         status: announcement.status,
         changeId: announcement.changeId,
         swapGroupId: announcement.swapGroupId,
+        payload: announcement.payload,
         createdAt: announcement.createdAt,
       })
       .from(announcement)
@@ -180,6 +182,130 @@ export class ScheduleService {
     return [...changes, ...announcements].sort(
       (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
     );
+  }
+
+  async fillSuggestions(quarterId: string) {
+    const [q] = await this.db
+      .select()
+      .from(quarter)
+      .where(eq(quarter.id, quarterId))
+      .limit(1);
+    if (!q) {
+      throw new NotFoundException({
+        code: 'not_found',
+        message: 'Quarter not found',
+      });
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    const assignments = await this.db
+      .select({
+        id: assignment.id,
+        classId: assignment.classId,
+        className: klass.name,
+        sortOrder: klass.sortOrder,
+        date: assignment.date,
+        memberId: assignment.memberId,
+        status: assignment.status,
+      })
+      .from(assignment)
+      .innerJoin(klass, eq(klass.id, assignment.classId))
+      .where(eq(assignment.quarterId, quarterId));
+
+    const poolRows = await this.db
+      .select({
+        classId: classTeacher.classId,
+        memberId: classTeacher.memberId,
+        name: member.fullName,
+        isPrimary: classTeacher.isPrimary,
+      })
+      .from(classTeacher)
+      .innerJoin(member, eq(member.id, classTeacher.memberId))
+      .where(eq(member.isActive, true));
+
+    const poolByClass = new Map<
+      string,
+      { memberId: string; name: string; isPrimary: boolean }[]
+    >();
+    for (const p of poolRows) {
+      const list = poolByClass.get(p.classId) ?? [];
+      list.push({ memberId: p.memberId, name: p.name, isPrimary: p.isPrimary });
+      poolByClass.set(p.classId, list);
+    }
+    for (const list of poolByClass.values()) {
+      list.sort((a, b) =>
+        a.isPrimary === b.isPrimary
+          ? a.name.localeCompare(b.name)
+          : a.isPrimary
+            ? -1
+            : 1,
+      );
+    }
+
+    const baseLoad = new Map<string, number>();
+    const takenByDate = new Map<string, Set<string>>();
+    for (const a of assignments) {
+      if (a.memberId && a.status !== 'cancelled') {
+        baseLoad.set(a.memberId, (baseLoad.get(a.memberId) ?? 0) + 1);
+      }
+      if (a.memberId) {
+        const set = takenByDate.get(a.date) ?? new Set<string>();
+        set.add(a.memberId);
+        takenByDate.set(a.date, set);
+      }
+    }
+
+    const holes = assignments
+      .filter((a) => !a.memberId && a.status !== 'cancelled' && a.date >= today)
+      .sort((a, b) =>
+        a.date === b.date
+          ? a.sortOrder - b.sortOrder
+          : a.date < b.date
+            ? -1
+            : 1,
+      );
+
+    const load = new Map(baseLoad);
+
+    const result = holes.map((h) => {
+      const pool = poolByClass.get(h.classId) ?? [];
+      const taken = takenByDate.get(h.date) ?? new Set<string>();
+      const candidates = pool.filter((p) => !taken.has(p.memberId));
+
+      let suggestedMemberId: string | null = null;
+      if (candidates.length > 0) {
+        const picked = candidates.reduce((best, cur) => {
+          const bestLoad = load.get(best.memberId) ?? 0;
+          const curLoad = load.get(cur.memberId) ?? 0;
+          if (curLoad !== bestLoad) return curLoad < bestLoad ? cur : best;
+          if (cur.isPrimary !== best.isPrimary)
+            return cur.isPrimary ? cur : best;
+          return cur.name.localeCompare(best.name) < 0 ? cur : best;
+        });
+        suggestedMemberId = picked.memberId;
+        load.set(picked.memberId, (load.get(picked.memberId) ?? 0) + 1);
+        const set = takenByDate.get(h.date) ?? new Set<string>();
+        set.add(picked.memberId);
+        takenByDate.set(h.date, set);
+      }
+
+      return {
+        assignmentId: h.id,
+        classId: h.classId,
+        className: h.className,
+        date: h.date,
+        suggestedMemberId,
+        options: pool.map((p) => ({
+          memberId: p.memberId,
+          name: p.name,
+          inPool: true,
+          quarterLoad: baseLoad.get(p.memberId) ?? 0,
+        })),
+      };
+    });
+
+    return { holes: result };
   }
 
   private async assertActiveInPool(tx: Tx, memberId: string, classId: string) {
@@ -331,6 +457,45 @@ export class ScheduleService {
     });
   }
 
+  async claim(assignmentId: string, ctx: MutationCtx) {
+    return this.db.transaction(async (tx) => {
+      const a = await this.loadAssignmentForUpdate(tx, assignmentId);
+      if (a.status !== 'needs_substitute') {
+        throw new UnprocessableEntityException({
+          code: 'not_claimable',
+          message: 'Slot is not awaiting a substitute',
+        });
+      }
+      await this.assertActiveInPool(tx, ctx.actorMemberId!, a.classId);
+
+      const prevState = this.snapshotOf(a);
+      await tx
+        .update(assignment)
+        .set({
+          originalMemberId: a.originalMemberId ?? a.memberId,
+          memberId: ctx.actorMemberId,
+          status: 'planned',
+          updatedAt: new Date(),
+        })
+        .where(eq(assignment.id, assignmentId));
+
+      const [change] = await tx
+        .insert(assignmentChange)
+        .values({
+          assignmentId,
+          type: 'substitute',
+          fromMemberId: a.memberId,
+          toMemberId: ctx.actorMemberId,
+          actorMemberId: ctx.actorMemberId,
+          source: ctx.source,
+          prevState,
+        })
+        .returning({ id: assignmentChange.id });
+
+      return { changeId: change.id };
+    });
+  }
+
   // ponytail: retried swaps aren't idempotent-keyed here; callers dedup (bot update_id claim / web single-submit).
   async swap(aAssignmentId: string, bAssignmentId: string, ctx: MutationCtx) {
     if (aAssignmentId === bAssignmentId) {
@@ -436,6 +601,129 @@ export class ScheduleService {
         .returning({ id: assignmentChange.id });
 
       return { changeId: change.id };
+    });
+  }
+
+  async revert(assignmentId: string, ctx: MutationCtx) {
+    return this.db.transaction(async (tx) => {
+      const a = await this.loadAssignmentForUpdate(tx, assignmentId);
+      if (a.status !== 'needs_substitute') {
+        throw new UnprocessableEntityException({
+          code: 'not_revertable',
+          message: 'Slot is not awaiting a substitute',
+        });
+      }
+      this.assertOwnership(a, ctx);
+
+      const prevState = this.snapshotOf(a);
+      await tx
+        .update(assignment)
+        .set({ status: 'planned', updatedAt: new Date() })
+        .where(eq(assignment.id, assignmentId));
+
+      const [change] = await tx
+        .insert(assignmentChange)
+        .values({
+          assignmentId,
+          type: 'reassign',
+          fromMemberId: a.memberId,
+          toMemberId: a.memberId,
+          actorMemberId: ctx.actorMemberId,
+          source: ctx.source,
+          prevState,
+        })
+        .returning({ id: assignmentChange.id });
+
+      return { changeId: change.id };
+    });
+  }
+
+  async cancel(assignmentId: string, ctx: MutationCtx) {
+    return this.db.transaction(async (tx) => {
+      const a = await this.loadAssignmentForUpdate(tx, assignmentId);
+      this.assertOwnership(a, ctx);
+
+      const prevState = this.snapshotOf(a);
+      await tx
+        .update(assignment)
+        .set({ status: 'cancelled', updatedAt: new Date() })
+        .where(eq(assignment.id, assignmentId));
+
+      const [change] = await tx
+        .insert(assignmentChange)
+        .values({
+          assignmentId,
+          type: 'cancel',
+          fromMemberId: a.memberId,
+          toMemberId: null,
+          actorMemberId: ctx.actorMemberId,
+          source: ctx.source,
+          prevState,
+        })
+        .returning({ id: assignmentChange.id });
+
+      return { changeId: change.id };
+    });
+  }
+
+  async bulkAssign(
+    items: { assignmentId: string; memberId: string }[],
+    ctx: MutationCtx,
+  ) {
+    if (items.length === 0) {
+      throw new BadRequestException({
+        code: 'invalid_bulk',
+        message: 'items must not be empty',
+      });
+    }
+    const ids = items.map((i) => i.assignmentId);
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestException({
+        code: 'invalid_bulk',
+        message: 'Duplicate assignmentId in items',
+      });
+    }
+
+    const sorted = [...items].sort((a, b) =>
+      a.assignmentId < b.assignmentId
+        ? -1
+        : a.assignmentId > b.assignmentId
+          ? 1
+          : 0,
+    );
+
+    return this.db.transaction(async (tx) => {
+      const swapGroupId = randomUUID();
+      const now = new Date();
+
+      for (const item of sorted) {
+        const a = await this.loadAssignmentForUpdate(tx, item.assignmentId);
+        await this.assertActiveInPool(tx, item.memberId, a.classId);
+
+        const prevState = this.snapshotOf(a);
+        await tx
+          .update(assignment)
+          .set({
+            memberId: item.memberId,
+            originalMemberId: null,
+            status: 'planned',
+            updatedAt: now,
+          })
+          .where(eq(assignment.id, item.assignmentId));
+
+        await tx.insert(assignmentChange).values({
+          assignmentId: item.assignmentId,
+          swapGroupId,
+          type: a.memberId ? 'reassign' : 'assign',
+          fromMemberId: a.memberId,
+          toMemberId: item.memberId,
+          actorMemberId: ctx.actorMemberId,
+          source: ctx.source,
+          prevState,
+        });
+      }
+
+      return { swapGroupId, count: items.length };
     });
   }
 

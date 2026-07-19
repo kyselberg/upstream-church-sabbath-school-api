@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Inject,
   Injectable,
   NotFoundException,
@@ -78,6 +79,7 @@ export class AnnounceService {
       chatId: settings.telegramGroupChatId,
       changeId: change.id,
       swapGroupId: change.swapGroupId,
+      payload: { text, undoRef },
       status: result.ok ? 'sent' : 'failed',
       messageId: result.ok ? (result.messageId ?? null) : null,
       sentAt: result.ok ? new Date() : null,
@@ -92,6 +94,98 @@ export class AnnounceService {
       ok: result.ok,
       messageId: result.ok ? (result.messageId ?? null) : null,
     };
+  }
+
+  async announceCustom(text: string, _actorMemberId: string | null) {
+    const [settings] = await this.db
+      .select()
+      .from(appSettings)
+      .where(eq(appSettings.id, 1))
+      .limit(1);
+    if (!settings?.telegramGroupChatId) {
+      throw new UnprocessableEntityException({
+        code: 'no_group',
+        message: 'Telegram group not configured',
+      });
+    }
+
+    const clean = text.trim();
+    if (!clean) {
+      throw new BadRequestException({
+        code: 'empty',
+        message: 'Text required',
+      });
+    }
+
+    const result = await this.bot.announce({
+      chatId: settings.telegramGroupChatId,
+      text: clean,
+      undoRef: null,
+      undoWindowMinutes: settings.undoWindowMinutes,
+    });
+
+    const [row] = await this.db
+      .insert(announcement)
+      .values({
+        type: 'custom',
+        chatId: settings.telegramGroupChatId,
+        payload: { text: clean },
+        status: result.ok ? 'sent' : 'failed',
+        messageId: result.ok ? (result.messageId ?? null) : null,
+        sentAt: result.ok ? new Date() : null,
+      })
+      .returning({ id: announcement.id });
+
+    return { ok: result.ok, id: row.id };
+  }
+
+  async retry(announcementId: string) {
+    const [row] = await this.db
+      .select()
+      .from(announcement)
+      .where(eq(announcement.id, announcementId))
+      .limit(1);
+    if (!row) {
+      throw new NotFoundException({
+        code: 'not_found',
+        message: 'Announcement not found',
+      });
+    }
+
+    const text = (row.payload as any)?.text as string | undefined;
+    if (!text) {
+      // ponytail: only announcements created after the payload change are
+      // retryable; a fresh app has ~none legacy without stored text.
+      throw new UnprocessableEntityException({
+        code: 'cannot_retry',
+        message: 'No stored text to resend',
+      });
+    }
+    const undoRef = (row.payload as any)?.undoRef ?? null;
+
+    const [settings] = await this.db
+      .select()
+      .from(appSettings)
+      .where(eq(appSettings.id, 1))
+      .limit(1);
+
+    const result = await this.bot.announce({
+      chatId: row.chatId,
+      text,
+      undoRef,
+      undoWindowMinutes: settings?.undoWindowMinutes ?? 30,
+    });
+
+    await this.db
+      .update(announcement)
+      .set({
+        status: result.ok ? 'sent' : 'failed',
+        messageId: result.ok ? (result.messageId ?? null) : row.messageId,
+        sentAt: result.ok ? new Date() : row.sentAt,
+      })
+      .where(eq(announcement.id, announcementId));
+
+    return { ok: result.ok };
   }
 
   private async memberName(memberId: string | null) {

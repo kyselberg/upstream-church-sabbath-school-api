@@ -14,6 +14,7 @@ import { SessionGuard } from '../auth/session.guard';
 import { PermissionGuard } from '../rbac/permission.guard';
 import { RequirePermissions } from '../rbac/permissions.decorator';
 import { RbacService } from '../rbac/rbac.service';
+import { BulkAssignDto } from './dto/bulk-assign.dto';
 import { ReassignDto } from './dto/reassign.dto';
 import { SubstituteDto } from './dto/substitute.dto';
 import { SwapDto } from './dto/swap.dto';
@@ -90,6 +91,52 @@ export class ScheduleController {
       source: 'web',
       canAssignAny: await this.canAssignAny(req.member!.id),
     });
+  }
+
+  @Post('assignments/:id/revert')
+  @RequirePermissions('schedule.assign.own')
+  async revert(@Param('id') id: string, @Req() req: AuthedRequest) {
+    return this.schedule.revert(id, {
+      actorMemberId: req.member!.id,
+      source: 'web',
+      canAssignAny: await this.canAssignAny(req.member!.id),
+    });
+  }
+
+  @Post('assignments/:id/claim')
+  @RequirePermissions('schedule.assign.own')
+  async claim(@Param('id') id: string, @Req() req: AuthedRequest) {
+    return this.schedule.claim(id, {
+      actorMemberId: req.member!.id,
+      source: 'web',
+      canAssignAny: await this.canAssignAny(req.member!.id),
+    });
+  }
+
+  @Post('assignments/:id/cancel')
+  @RequirePermissions('schedule.assign')
+  async cancel(@Param('id') id: string, @Req() req: AuthedRequest) {
+    return this.schedule.cancel(id, {
+      actorMemberId: req.member!.id,
+      source: 'web',
+      canAssignAny: await this.canAssignAny(req.member!.id),
+    });
+  }
+
+  @Post('assignments/bulk-assign')
+  @RequirePermissions('schedule.assign')
+  async bulkAssign(@Body() dto: BulkAssignDto, @Req() req: AuthedRequest) {
+    return this.schedule.bulkAssign(dto.items, {
+      actorMemberId: req.member!.id,
+      source: 'web',
+      canAssignAny: await this.canAssignAny(req.member!.id),
+    });
+  }
+
+  @Get('quarters/:id/fill-suggestions')
+  @RequirePermissions('schedule.assign')
+  fillSuggestions(@Param('id') id: string) {
+    return this.schedule.fillSuggestions(id);
   }
 
   @Post('undo')
