@@ -29,76 +29,78 @@ export class AnnounceService {
     actorMemberId: string | null,
     changeId?: string,
   ) {
-    const change = await this.findChange(assignmentId, changeId);
-    if (!change)
-      throw new NotFoundException({
-        code: 'not_found',
-        message: 'Change not found',
+    return this.db.transaction(async (tx) => {
+      const change = await this.findChange(tx, assignmentId, changeId);
+      if (!change)
+        throw new NotFoundException({
+          code: 'not_found',
+          message: 'Change not found',
+        });
+      if (change.announced) {
+        return { ok: true, messageId: null };
+      }
+
+      const [a] = await tx
+        .select({ date: assignment.date, className: klass.name })
+        .from(assignment)
+        .innerJoin(klass, eq(klass.id, assignment.classId))
+        .where(eq(assignment.id, assignmentId))
+        .limit(1);
+      if (!a)
+        throw new NotFoundException({
+          code: 'not_found',
+          message: 'Assignment not found',
+        });
+
+      const [settings] = await tx
+        .select()
+        .from(appSettings)
+        .where(eq(appSettings.id, 1))
+        .limit(1);
+      if (!settings?.telegramGroupChatId) {
+        throw new UnprocessableEntityException({
+          code: 'no_group',
+          message: 'Telegram group not configured',
+        });
+      }
+
+      const fromName = await this.memberName(change.fromMemberId);
+      const toName = await this.memberName(change.toMemberId);
+      const text = `Зміна: ${a.className} ${a.date} — ${fromName} → ${toName}`;
+      const undoRef = change.swapGroupId
+        ? `swap:${change.swapGroupId}`
+        : `change:${change.id}`;
+
+      const result = await this.bot.announce({
+        chatId: settings.telegramGroupChatId,
+        text,
+        undoRef,
+        undoWindowMinutes: settings.undoWindowMinutes,
       });
-    if (change.announced) {
-      return { ok: true, messageId: null };
-    }
 
-    const [a] = await this.db
-      .select({ date: assignment.date, className: klass.name })
-      .from(assignment)
-      .innerJoin(klass, eq(klass.id, assignment.classId))
-      .where(eq(assignment.id, assignmentId))
-      .limit(1);
-    if (!a)
-      throw new NotFoundException({
-        code: 'not_found',
-        message: 'Assignment not found',
+      await tx.insert(announcement).values({
+        type: 'change',
+        chatId: settings.telegramGroupChatId,
+        changeId: change.id,
+        swapGroupId: change.swapGroupId,
+        payload: { text, undoRef },
+        status: result.ok ? 'sent' : 'failed',
+        messageId: result.ok ? (result.messageId ?? null) : null,
+        sentAt: result.ok ? new Date() : null,
       });
 
-    const [settings] = await this.db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.id, 1))
-      .limit(1);
-    if (!settings?.telegramGroupChatId) {
-      throw new UnprocessableEntityException({
-        code: 'no_group',
-        message: 'Telegram group not configured',
-      });
-    }
+      if (result.ok) {
+        await tx
+          .update(assignmentChange)
+          .set({ announced: true })
+          .where(eq(assignmentChange.id, change.id));
+      }
 
-    const fromName = await this.memberName(change.fromMemberId);
-    const toName = await this.memberName(change.toMemberId);
-    const text = `Зміна: ${a.className} ${a.date} — ${fromName} → ${toName}`;
-    const undoRef = change.swapGroupId
-      ? `swap:${change.swapGroupId}`
-      : `change:${change.id}`;
-
-    const result = await this.bot.announce({
-      chatId: settings.telegramGroupChatId,
-      text,
-      undoRef,
-      undoWindowMinutes: settings.undoWindowMinutes,
+      return {
+        ok: result.ok,
+        messageId: result.ok ? (result.messageId ?? null) : null,
+      };
     });
-
-    await this.db.insert(announcement).values({
-      type: 'change',
-      chatId: settings.telegramGroupChatId,
-      changeId: change.id,
-      swapGroupId: change.swapGroupId,
-      payload: { text, undoRef },
-      status: result.ok ? 'sent' : 'failed',
-      messageId: result.ok ? (result.messageId ?? null) : null,
-      sentAt: result.ok ? new Date() : null,
-    });
-
-    if (result.ok) {
-      await this.db
-        .update(assignmentChange)
-        .set({ announced: true })
-        .where(eq(assignmentChange.id, change.id));
-    }
-
-    return {
-      ok: result.ok,
-      messageId: result.ok ? (result.messageId ?? null) : null,
-    };
   }
 
   async announceCustom(text: string, _actorMemberId: string | null) {
@@ -209,17 +211,18 @@ export class AnnounceService {
     return row?.fullName ?? 'вільно';
   }
 
-  private async findChange(assignmentId: string, changeId?: string) {
+  private async findChange(tx: Db, assignmentId: string, changeId?: string) {
     if (changeId) {
-      const [row] = await this.db
+      const [row] = await tx
         .select()
         .from(assignmentChange)
         .where(eq(assignmentChange.id, changeId))
+        .for('update')
         .limit(1);
       return row ?? null;
     }
 
-    const [row] = await this.db
+    const [row] = await tx
       .select()
       .from(assignmentChange)
       .where(
@@ -229,6 +232,7 @@ export class AnnounceService {
         ),
       )
       .orderBy(desc(assignmentChange.createdAt))
+      .for('update')
       .limit(1);
     return row ?? null;
   }

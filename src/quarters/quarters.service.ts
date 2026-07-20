@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { asc, desc, eq } from 'drizzle-orm';
 import { saturdaysBetween } from '../common/dates';
@@ -47,15 +48,23 @@ export class QuartersService {
   }
 
   async remove(id: string) {
-    return this.db.transaction(async (tx) => {
-      await tx.delete(assignment).where(eq(assignment.quarterId, id));
-      const [row] = await tx
-        .delete(quarter)
-        .where(eq(quarter.id, id))
-        .returning();
-      if (!row) throw new NotFoundException('Quarter not found');
-      return row;
-    });
+    const [hasAssignment] = await this.db
+      .select({ id: assignment.id })
+      .from(assignment)
+      .where(eq(assignment.quarterId, id))
+      .limit(1);
+    if (hasAssignment)
+      throw new UnprocessableEntityException({
+        code: 'quarter_has_assignments',
+        message: 'Квартал має призначення — спершу видали або перенеси розклад.',
+      });
+
+    const [row] = await this.db
+      .delete(quarter)
+      .where(eq(quarter.id, id))
+      .returning();
+    if (!row) throw new NotFoundException('Quarter not found');
+    return row;
   }
 
   async generateSaturdays(id: string, autoFill = false) {

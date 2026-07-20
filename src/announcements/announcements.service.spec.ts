@@ -14,14 +14,14 @@ describe('AnnouncementsService.claim (integration)', () => {
     }
   });
 
-  it('re-claims an existing not-sent row instead of blocking forever', async () => {
+  it('re-claims a failed row for retry', async () => {
     const [row] = await db
       .insert(announcement)
       .values({
         type: 'weekly_reminder',
         targetDate: '2099-01-03',
         chatId: 1,
-        status: 'pending',
+        status: 'failed',
       })
       .returning();
     ids.push(row.id);
@@ -33,6 +33,27 @@ describe('AnnouncementsService.claim (integration)', () => {
     });
 
     expect(result).toEqual({ claimed: true, announcementId: row.id });
+  });
+
+  it('does not re-claim a pending row (in-flight or sent-but-unconfirmed)', async () => {
+    const [row] = await db
+      .insert(announcement)
+      .values({
+        type: 'weekly_reminder',
+        targetDate: '2099-01-04',
+        chatId: 1,
+        status: 'pending',
+      })
+      .returning();
+    ids.push(row.id);
+
+    const result = await service.claim({
+      type: 'weekly_reminder',
+      targetDate: '2099-01-04',
+      chatId: 1,
+    });
+
+    expect(result).toEqual({ claimed: false, announcementId: row.id });
   });
 
   it('never re-sends an already-sent row', async () => {

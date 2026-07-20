@@ -192,4 +192,15 @@ export class InternalController {
       });
     return { ok: true };
   }
+
+  @Post('reminders/:id/failed')
+  async remindersFailed(@Param('id') id: string) {
+    const row = await this.announcements.markFailed(id);
+    if (!row)
+      throw new NotFoundException({
+        code: 'not_found',
+        message: 'Announcement not found',
+      });
+    return { ok: true };
+  }
 }

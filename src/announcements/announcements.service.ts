@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, ne } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../db/db.module';
 import { announcement } from '../db/schema';
 
@@ -51,20 +51,19 @@ export class AnnouncementsService {
       .limit(1);
 
     if (!existing) return { claimed: false, announcementId: null };
-    if (existing.status === 'sent') {
+    if (existing.status !== 'failed') {
+      // ponytail: sent -> already delivered; pending -> in-flight or
+      // sent-but-unconfirmed. Either way, fail closed instead of resending.
       return { claimed: false, announcementId: existing.id };
     }
 
-    // ponytail: flip the status so the compare-and-set below only lets one
-    // concurrent re-claim win the row (a same-value "touch" wouldn't gate).
-    const nextStatus = existing.status === 'pending' ? 'failed' : 'pending';
     const [reclaimed] = await this.db
       .update(announcement)
-      .set({ status: nextStatus })
+      .set({ status: 'pending' })
       .where(
         and(
           eq(announcement.id, existing.id),
-          eq(announcement.status, existing.status),
+          eq(announcement.status, 'failed'),
         ),
       )
       .returning({ id: announcement.id });
@@ -79,6 +78,15 @@ export class AnnouncementsService {
       .update(announcement)
       .set({ status: 'sent', messageId, sentAt: new Date() })
       .where(eq(announcement.id, id))
+      .returning();
+    return row ?? null;
+  }
+
+  async markFailed(id: string) {
+    const [row] = await this.db
+      .update(announcement)
+      .set({ status: 'failed' })
+      .where(and(eq(announcement.id, id), ne(announcement.status, 'sent')))
       .returning();
     return row ?? null;
   }
