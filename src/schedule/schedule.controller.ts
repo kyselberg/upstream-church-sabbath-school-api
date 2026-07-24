@@ -74,7 +74,7 @@ export class ScheduleController {
   }
 
   @Post('swaps')
-  @RequirePermissions('swap.propose')
+  @RequirePermissions('schedule.assign')
   async swap(@Body() dto: SwapDto, @Req() req: AuthedRequest) {
     return this.schedule.swap(dto.aId, dto.bId, {
       actorMemberId: req.member!.id,

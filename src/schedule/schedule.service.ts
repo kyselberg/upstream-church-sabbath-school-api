@@ -18,6 +18,7 @@ import {
   isNull,
   lte,
   ne,
+  notInArray,
   sql,
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -358,8 +359,16 @@ export class ScheduleService {
     tx: Tx,
     memberId: string,
     date: string,
-    exceptAssignmentId: string,
+    exceptAssignmentId: string | string[],
   ) {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${memberId} || ':' || ${date}))`,
+    );
+
+    const exceptIds = Array.isArray(exceptAssignmentId)
+      ? exceptAssignmentId
+      : [exceptAssignmentId];
+
     const [clash] = await tx
       .select({ id: assignment.id })
       .from(assignment)
@@ -368,7 +377,7 @@ export class ScheduleService {
           eq(assignment.memberId, memberId),
           eq(assignment.date, date),
           ne(assignment.status, 'cancelled'),
-          ne(assignment.id, exceptAssignmentId),
+          notInArray(assignment.id, exceptIds),
         ),
       )
       .limit(1);
@@ -393,6 +402,15 @@ export class ScheduleService {
       throw new ForbiddenException({
         code: 'forbidden',
         message: 'Not your assignment',
+      });
+    }
+  }
+
+  private assertNotCancelled(a: { status: string }, ctx: MutationCtx) {
+    if (a.status === 'cancelled' && !ctx.canAssignAny) {
+      throw new UnprocessableEntityException({
+        code: 'lesson_cancelled',
+        message: 'Урок скасовано',
       });
     }
   }
@@ -428,6 +446,7 @@ export class ScheduleService {
     return this.db.transaction(async (tx) => {
       const a = await this.loadAssignmentForUpdate(tx, assignmentId);
       this.assertOwnership(a, ctx);
+      this.assertNotCancelled(a, ctx);
       await this.assertActiveInPool(tx, toMemberId, a.classId, !ctx.canAssignAny);
       await this.assertNotDoubleBooked(tx, toMemberId, a.date, assignmentId);
 
@@ -469,6 +488,7 @@ export class ScheduleService {
     const run = async (t: Tx) => {
       const a = await this.loadAssignmentForUpdate(t, assignmentId);
       this.assertOwnership(a, ctx);
+      this.assertNotCancelled(a, ctx);
       await this.assertActiveInPool(t, substituteMemberId, a.classId, !ctx.canAssignAny);
       await this.assertNotDoubleBooked(t, substituteMemberId, a.date, assignmentId);
 
@@ -558,6 +578,13 @@ export class ScheduleService {
       const aRow = firstId === aAssignmentId ? firstRow : secondRow;
       const bRow = firstId === aAssignmentId ? secondRow : firstRow;
 
+      if (aRow.status === 'cancelled' || bRow.status === 'cancelled') {
+        throw new UnprocessableEntityException({
+          code: 'lesson_cancelled',
+          message: 'Не можна обмінятись скасованим уроком',
+        });
+      }
+
       if (aRow.memberId === bRow.memberId) {
         throw new UnprocessableEntityException({
           code: 'nothing_to_swap',
@@ -636,6 +663,7 @@ export class ScheduleService {
     return this.db.transaction(async (tx) => {
       const a = await this.loadAssignmentForUpdate(tx, assignmentId);
       this.assertOwnership(a, ctx);
+      this.assertNotCancelled(a, ctx);
 
       const prevState = this.snapshotOf(a);
       await tx
@@ -874,11 +902,14 @@ export class ScheduleService {
       const targetIds = changes.map((c) => c.id);
       const assignmentIds = [...new Set(changes.map((c) => c.assignmentId))];
 
-      await tx
-        .select({ id: assignment.id })
+      const lockedAssignments = await tx
+        .select({ id: assignment.id, date: assignment.date })
         .from(assignment)
         .where(inArray(assignment.id, assignmentIds))
         .for('update');
+      const dateByAssignmentId = new Map(
+        lockedAssignments.map((r) => [r.id, r.date]),
+      );
 
       const activeRowsForAssignments = await tx
         .select()
@@ -915,6 +946,15 @@ export class ScheduleService {
             code: 'cannot_undo_legacy',
             message: 'Change predates snapshot; cannot undo',
           });
+        }
+        if (change.prevState.memberId) {
+          const date = dateByAssignmentId.get(change.assignmentId)!;
+          await this.assertNotDoubleBooked(
+            tx,
+            change.prevState.memberId,
+            date,
+            assignmentIds,
+          );
         }
         await tx
           .update(assignment)

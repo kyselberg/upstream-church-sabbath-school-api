@@ -18,6 +18,9 @@ import { MetricsInterceptor } from './metrics.interceptor';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   if (!process.env.WEB_ORIGIN) throw new Error('WEB_ORIGIN is required');
+  for (const name of ['BETTER_AUTH_SECRET', 'INTERNAL_TOKEN', 'DATABASE_URL']) {
+    if (!process.env[name]) throw new Error(`${name} is required`);
+  }
   app.enableCors({ origin: process.env.WEB_ORIGIN, credentials: true });
 
   const expressApp = app.getHttpAdapter().getInstance();
@@ -38,13 +41,15 @@ async function bootstrap() {
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new MetricsInterceptor());
 
-  const config = new DocumentBuilder()
-    .setTitle('sabbath-api')
-    .setVersion('0.0.1')
-    .addCookieAuth('better-auth.session_token')
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document);
+  if (process.env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('sabbath-api')
+      .setVersion('0.0.1')
+      .addCookieAuth('better-auth.session_token')
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('docs', app, document);
+  }
 
   await app.listen(process.env.PORT ?? 3000);
 }

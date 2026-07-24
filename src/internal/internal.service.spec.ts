@@ -14,7 +14,7 @@ describe('isAlreadyLinked', () => {
 });
 
 describe('onboarding token TTL', () => {
-  it('is 1 hour', () => {
-    expect(TOKEN_TTL_MS).toBe(60 * 60 * 1000);
+  it('is 15 minutes', () => {
+    expect(TOKEN_TTL_MS).toBe(15 * 60 * 1000);
   });
 });
