@@ -135,6 +135,15 @@ export class InternalController {
     });
   }
 
+  @Post('schedule/free')
+  free(@Body() dto: AssignmentActorInternalDto) {
+    return this.schedule.markUnavailable(dto.assignmentId, {
+      actorMemberId: dto.actorMemberId,
+      source: 'telegram',
+      canAssignAny: false,
+    });
+  }
+
   @Post('schedule/claim')
   claimSchedule(@Body() dto: AssignmentActorInternalDto) {
     return this.schedule.claim(dto.assignmentId, {

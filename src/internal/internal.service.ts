@@ -264,6 +264,7 @@ export class InternalService {
         classId: klass.id,
         className: klass.name,
         date: assignment.date,
+        isPrimary: classTeacher.isPrimary,
         sortOrder: klass.sortOrder,
       })
       .from(assignment)
