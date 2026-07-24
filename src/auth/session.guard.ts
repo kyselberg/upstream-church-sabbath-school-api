@@ -40,6 +40,13 @@ export class SessionGuard implements CanActivate {
       .where(eq(member.userId, result.user.id))
       .limit(1);
 
+    if (memberRow && memberRow.isActive === false) {
+      throw new UnauthorizedException({
+        code: 'unauthorized',
+        message: 'Акаунт неактивний',
+      });
+    }
+
     req.session = result.session;
     req.user = result.user;
     req.member = memberRow ?? null;

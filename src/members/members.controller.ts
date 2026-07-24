@@ -37,14 +37,18 @@ export class MembersController {
 
   @Patch(':id')
   @RequirePermissions('member.manage')
-  update(@Param('id') id: string, @Body() dto: UpdateMemberDto) {
-    return this.members.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateMemberDto,
+    @Req() req: AuthedRequest,
+  ) {
+    return this.members.update(id, dto, req.member?.id);
   }
 
   @Delete(':id')
   @RequirePermissions('member.manage')
-  remove(@Param('id') id: string) {
-    return this.members.remove(id);
+  remove(@Param('id') id: string, @Req() req: AuthedRequest) {
+    return this.members.remove(id, req.member?.id);
   }
 
   @Post(':id/telegram-token')
@@ -55,7 +59,7 @@ export class MembersController {
 
   @Post(':id/telegram-unlink')
   @RequirePermissions('telegram.link')
-  unlinkTelegram(@Param('id') id: string) {
-    return this.members.unlinkTelegram(id);
+  unlinkTelegram(@Param('id') id: string, @Req() req: AuthedRequest) {
+    return this.members.unlinkTelegram(id, req.member?.id);
   }
 }

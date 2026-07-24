@@ -31,7 +31,7 @@ async function sendMagicLink({ email, token }: { email: string; token: string })
       },
       body: JSON.stringify({
         telegramUserId: memberRow.telegramUserId,
-        text: `🔑 Твоє посилання для входу (діє 5 хв):\n${link}`,
+        text: `🔑 Твоє посилання для входу (діє 15 хв):\n${link}`,
       }),
     });
     if (!res.ok) {
@@ -85,6 +85,13 @@ export const auth = betterAuth({
   ],
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL,
+  rateLimit: {
+    enabled: process.env.NODE_ENV === 'production',
+    window: 60,
+    customRules: {
+      '/sign-in/magic-link': { window: 60, max: 3 },
+    },
+  },
   trustedOrigins: [process.env.WEB_ORIGIN, process.env.BETTER_AUTH_URL].filter(
     (v): v is string => Boolean(v),
   ),

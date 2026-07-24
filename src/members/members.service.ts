@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -7,12 +8,13 @@ import {
 import { randomBytes } from 'crypto';
 import { eq } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../db/db.module';
+import { session } from '../db/auth-schema';
 import { member, telegramLinkToken, user } from '../db/schema';
 import { RbacService } from '../rbac/rbac.service';
 import type { CreateMemberDto } from './dto/create-member.dto';
 import type { UpdateMemberDto } from './dto/update-member.dto';
 
-export const TOKEN_TTL_MS = 60 * 60 * 1000;
+export const TOKEN_TTL_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class MembersService {
@@ -35,17 +37,46 @@ export class MembersService {
       .then(([row]) => row);
   }
 
-  async update(id: string, dto: UpdateMemberDto) {
+  private async assertCanManageTarget(
+    actorMemberId: string | undefined,
+    targetMemberId: string,
+  ) {
+    if (actorMemberId !== undefined && actorMemberId === targetMemberId) {
+      return;
+    }
+
+    const targetIsPrivileged =
+      (await this.rbacService.hasRole(targetMemberId, 'admin')) ||
+      (await this.rbacService.hasRole(targetMemberId, 'superadmin'));
+    if (!targetIsPrivileged) return;
+
+    const actorIsSuperadmin =
+      actorMemberId !== undefined &&
+      (await this.rbacService.hasRole(actorMemberId, 'superadmin'));
+    if (!actorIsSuperadmin) {
+      throw new ForbiddenException({
+        code: 'forbidden',
+        message: 'Недостатньо прав для цього учасника',
+      });
+    }
+  }
+
+  async update(id: string, dto: UpdateMemberDto, actorMemberId?: string) {
+    await this.assertCanManageTarget(actorMemberId, id);
+
     const [row] = await this.db
       .update(member)
       .set(dto)
       .where(eq(member.id, id))
       .returning();
     if (!row) throw new NotFoundException('Member not found');
+    if (dto.isActive === false && row.userId) {
+      await this.db.delete(session).where(eq(session.userId, row.userId));
+    }
     return row;
   }
 
-  async remove(id: string) {
+  async remove(id: string, actorMemberId?: string) {
     return this.db.transaction(async (tx) => {
       const [row] = await tx
         .select()
@@ -62,6 +93,8 @@ export class MembersService {
         });
       }
 
+      await this.assertCanManageTarget(actorMemberId, id);
+
       const [deleted] = await tx
         .delete(member)
         .where(eq(member.id, id))
@@ -77,6 +110,8 @@ export class MembersService {
     memberId: string,
     actorMemberId: string | undefined,
   ) {
+    await this.assertCanManageTarget(actorMemberId, memberId);
+
     const [target] = await this.db
       .select()
       .from(member)
@@ -102,7 +137,9 @@ export class MembersService {
     };
   }
 
-  async unlinkTelegram(id: string) {
+  async unlinkTelegram(id: string, actorMemberId?: string) {
+    await this.assertCanManageTarget(actorMemberId, id);
+
     const [row] = await this.db
       .update(member)
       .set({
@@ -113,6 +150,9 @@ export class MembersService {
       .where(eq(member.id, id))
       .returning();
     if (!row) throw new NotFoundException('Member not found');
+    if (row.userId) {
+      await this.db.delete(session).where(eq(session.userId, row.userId));
+    }
     return row;
   }
 }

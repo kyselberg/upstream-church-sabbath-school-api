@@ -17,6 +17,7 @@ export class InternalAuthController {
         .select()
         .from(member)
         .where(eq(member.telegramUserId, dto.telegramUserId))
+        .for('update')
         .limit(1);
 
       if (!memberRow) {
