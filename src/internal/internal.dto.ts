@@ -89,6 +89,11 @@ export class AgentLogFinishDto {
     result?: unknown;
     changeId?: string;
   }>;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  actorMemberId?: string;
 }
 
 export class RemindersClaimDto {
