@@ -125,6 +125,15 @@ export class InternalController {
     });
   }
 
+  @Post('schedule/claim')
+  claimSchedule(@Body() dto: AssignmentActorInternalDto) {
+    return this.schedule.claim(dto.assignmentId, {
+      actorMemberId: dto.actorMemberId,
+      source: 'telegram',
+      canAssignAny: false,
+    });
+  }
+
   @Post('schedule/undo')
   undo(@Body() dto: UndoInternalDto) {
     if (!dto.byMemberId)
