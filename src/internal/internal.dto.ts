@@ -137,6 +137,16 @@ export class SubstitutionRequestDto {
   toMemberId!: string;
 }
 
+export class AssignmentActorInternalDto {
+  @ApiProperty()
+  @IsUUID()
+  assignmentId!: string;
+
+  @ApiProperty()
+  @IsUUID()
+  actorMemberId!: string;
+}
+
 export class SubstitutionRespondDto {
   @ApiProperty()
   @IsBoolean()

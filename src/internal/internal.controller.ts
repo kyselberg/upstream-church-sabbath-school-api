@@ -16,6 +16,7 @@ import { SubstitutionService } from '../substitution/substitution.service';
 import {
   AgentLogClaimDto,
   AgentLogFinishDto,
+  AssignmentActorInternalDto,
   LinkTelegramDto,
   MarkUnavailableInternalDto,
   RemindersClaimDto,
@@ -110,6 +111,15 @@ export class InternalController {
     const a = await this.assignmentFor(dto.classId, dto.date);
     return this.schedule.markUnavailable(a.id, {
       actorMemberId: dto.actorMemberId ?? null,
+      source: 'telegram',
+      canAssignAny: false,
+    });
+  }
+
+  @Post('schedule/revert')
+  revert(@Body() dto: AssignmentActorInternalDto) {
+    return this.schedule.revert(dto.assignmentId, {
+      actorMemberId: dto.actorMemberId,
       source: 'telegram',
       canAssignAny: false,
     });
