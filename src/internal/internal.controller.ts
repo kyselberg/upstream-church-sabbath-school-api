@@ -16,6 +16,7 @@ import { SubstitutionService } from '../substitution/substitution.service';
 import {
   AgentLogClaimDto,
   AgentLogFinishDto,
+  AssignmentActorInternalDto,
   LinkTelegramDto,
   MarkUnavailableInternalDto,
   RemindersClaimDto,
@@ -59,6 +60,11 @@ export class InternalController {
     return this.internal.activeMember(id);
   }
 
+  @Get('members/:id/profile')
+  profile(@Param('id') id: string) {
+    return this.internal.profile(id);
+  }
+
   @Get('members/:id/in-pool')
   inPool(@Param('id') id: string, @Query('classId') classId: string) {
     return this.internal.inPool(id, classId);
@@ -93,6 +99,11 @@ export class InternalController {
     return this.schedule.who(date);
   }
 
+  @Get('schedule/claimable')
+  claimable(@Query('memberId') memberId: string) {
+    return this.internal.claimableSlots(memberId);
+  }
+
   @Get('schedule/upcoming')
   async upcoming(@Query('memberId') memberId?: string) {
     const rows = await this.schedule.listUpcoming(memberId);
@@ -110,6 +121,33 @@ export class InternalController {
     const a = await this.assignmentFor(dto.classId, dto.date);
     return this.schedule.markUnavailable(a.id, {
       actorMemberId: dto.actorMemberId ?? null,
+      source: 'telegram',
+      canAssignAny: false,
+    });
+  }
+
+  @Post('schedule/revert')
+  revert(@Body() dto: AssignmentActorInternalDto) {
+    return this.schedule.revert(dto.assignmentId, {
+      actorMemberId: dto.actorMemberId,
+      source: 'telegram',
+      canAssignAny: false,
+    });
+  }
+
+  @Post('schedule/free')
+  free(@Body() dto: AssignmentActorInternalDto) {
+    return this.schedule.markUnavailable(dto.assignmentId, {
+      actorMemberId: dto.actorMemberId,
+      source: 'telegram',
+      canAssignAny: false,
+    });
+  }
+
+  @Post('schedule/claim')
+  claimSchedule(@Body() dto: AssignmentActorInternalDto) {
+    return this.schedule.claim(dto.assignmentId, {
+      actorMemberId: dto.actorMemberId,
       source: 'telegram',
       canAssignAny: false,
     });

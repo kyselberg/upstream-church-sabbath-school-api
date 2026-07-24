@@ -89,6 +89,11 @@ export class AgentLogFinishDto {
     result?: unknown;
     changeId?: string;
   }>;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  actorMemberId?: string;
 }
 
 export class RemindersClaimDto {
@@ -135,6 +140,16 @@ export class SubstitutionRequestDto {
   @ApiProperty()
   @IsUUID()
   toMemberId!: string;
+}
+
+export class AssignmentActorInternalDto {
+  @ApiProperty()
+  @IsUUID()
+  assignmentId!: string;
+
+  @ApiProperty()
+  @IsUUID()
+  actorMemberId!: string;
 }
 
 export class SubstitutionRespondDto {

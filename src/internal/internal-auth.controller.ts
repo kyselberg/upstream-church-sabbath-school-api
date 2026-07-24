@@ -4,12 +4,19 @@ import { eq } from 'drizzle-orm';
 import { auth } from '../auth/auth';
 import { db } from '../db/db.module';
 import { member, user } from '../db/schema';
+import { RbacService } from '../rbac/rbac.service';
 import { LoginLinkInternalDto } from './internal.dto';
 import { InternalTokenGuard } from './internal-token.guard';
+
+export function hasAdminRole(perms: Set<string>): boolean {
+  return perms.has('member.manage') || perms.has('settings.manage');
+}
 
 @Controller('internal/auth')
 @UseGuards(InternalTokenGuard)
 export class InternalAuthController {
+  constructor(private readonly rbac: RbacService) {}
+
   @Post('login-link')
   async loginLink(@Body() dto: LoginLinkInternalDto) {
     const result = await db.transaction(async (tx) => {
@@ -28,6 +35,11 @@ export class InternalAuthController {
       }
       if (!memberRow.telegramLinkedAt) {
         return { error: 'not_linked' };
+      }
+
+      const perms = await this.rbac.getMemberPermissions(memberRow.id);
+      if (!hasAdminRole(perms)) {
+        return { error: 'not_admin' as const };
       }
 
       if (memberRow.userId) {

@@ -18,6 +18,7 @@ export interface FinishAgentLogParams {
     result?: unknown;
     changeId?: string;
   }>;
+  actorMemberId?: string | null;
 }
 
 @Injectable()
@@ -49,6 +50,7 @@ export class AgentLogService {
         result: first?.result ?? null,
         changeId: first?.changeId ?? null,
         status: 'applied',
+        memberId: params.actorMemberId ?? null,
       })
       .where(eq(agentActionLog.updateId, params.updateId))
       .returning();
