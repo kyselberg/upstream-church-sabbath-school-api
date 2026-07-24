@@ -7,6 +7,8 @@ import {
   classTeacher,
   klass,
   member,
+  memberRole,
+  role,
   telegramLinkToken,
 } from '../db/schema';
 
@@ -230,6 +232,28 @@ export class InternalService {
           }
         : null,
     }));
+  }
+
+  async profile(memberId: string) {
+    const [m] = await this.db
+      .select({ fullName: member.fullName, telegramUsername: member.telegramUsername })
+      .from(member)
+      .where(eq(member.id, memberId))
+      .limit(1);
+    if (!m)
+      throw new NotFoundException({ code: 'not_found', message: 'Member not found' });
+    const classes = await this.db
+      .select({ classId: klass.id, name: klass.name, isPrimary: classTeacher.isPrimary })
+      .from(classTeacher)
+      .innerJoin(klass, eq(klass.id, classTeacher.classId))
+      .where(eq(classTeacher.memberId, memberId))
+      .orderBy(asc(klass.sortOrder));
+    const roleRows = await this.db
+      .select({ key: role.key })
+      .from(memberRole)
+      .innerJoin(role, eq(role.id, memberRole.roleId))
+      .where(eq(memberRole.memberId, memberId));
+    return { ...m, classes, roles: roleRows.map((r) => r.key) };
   }
 
   async claimableSlots(memberId: string) {

@@ -60,6 +60,11 @@ export class InternalController {
     return this.internal.activeMember(id);
   }
 
+  @Get('members/:id/profile')
+  profile(@Param('id') id: string) {
+    return this.internal.profile(id);
+  }
+
   @Get('members/:id/in-pool')
   inPool(@Param('id') id: string, @Query('classId') classId: string) {
     return this.internal.inPool(id, classId);
