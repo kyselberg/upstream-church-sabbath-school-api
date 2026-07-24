@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, eq, ilike, or } from 'drizzle-orm';
+import { and, asc, eq, gte, ilike, or } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../db/db.module';
 import {
   appSettings,
@@ -230,5 +230,26 @@ export class InternalService {
           }
         : null,
     }));
+  }
+
+  async claimableSlots(memberId: string) {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = await this.db
+      .select({
+        assignmentId: assignment.id,
+        classId: klass.id,
+        className: klass.name,
+        date: assignment.date,
+        sortOrder: klass.sortOrder,
+      })
+      .from(assignment)
+      .innerJoin(klass, eq(klass.id, assignment.classId))
+      .innerJoin(
+        classTeacher,
+        and(eq(classTeacher.classId, klass.id), eq(classTeacher.memberId, memberId)),
+      )
+      .where(and(eq(assignment.status, 'needs_substitute'), gte(assignment.date, today)))
+      .orderBy(asc(assignment.date), asc(klass.sortOrder));
+    return rows.map(({ sortOrder: _s, ...r }) => r);
   }
 }

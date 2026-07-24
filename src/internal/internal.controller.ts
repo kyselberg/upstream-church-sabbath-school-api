@@ -94,6 +94,11 @@ export class InternalController {
     return this.schedule.who(date);
   }
 
+  @Get('schedule/claimable')
+  claimable(@Query('memberId') memberId: string) {
+    return this.internal.claimableSlots(memberId);
+  }
+
   @Get('schedule/upcoming')
   async upcoming(@Query('memberId') memberId?: string) {
     const rows = await this.schedule.listUpcoming(memberId);
