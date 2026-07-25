@@ -126,6 +126,7 @@ export class InternalService {
       llmModel: row.llmModel,
       llmApiKey: row.llmApiKey,
       llmBaseUrl: row.llmBaseUrl,
+      churchInfo: row.churchInfo,
       botLocale: row.botLocale,
       undoWindowMinutes: row.undoWindowMinutes,
       timezone: row.timezone,
