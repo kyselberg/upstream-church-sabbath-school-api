@@ -357,6 +357,7 @@ export const appSettings = pgTable('app_settings', {
   llmModel: text('llm_model').default('claude-sonnet-4-6').notNull(),
   llmApiKey: text('llm_api_key'),
   llmBaseUrl: text('llm_base_url'),
+  churchInfo: text('church_info'),
   botLocale: text('bot_locale').default('uk').notNull(),
   updatedAt: tstz('updated_at').defaultNow().notNull(),
 });

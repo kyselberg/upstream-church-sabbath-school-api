@@ -75,4 +75,9 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsString()
   botLocale?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  churchInfo?: string;
 }
